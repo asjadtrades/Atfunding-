@@ -1,0 +1,121 @@
+{
+  "adminConfig": {
+    "email": "atgrowfund@gmail.com",
+    "password": "@Asjad.khan07"
+  },
+  "users": [
+    {
+      "id": "admin-atgrowfund",
+      "email": "asjadtrades07@gmail.com",
+      "name": "ATFunding Admin",
+      "role": "admin",
+      "kycStatus": "approved",
+      "createdAt": "2026-06-30T05:31:50.119Z"
+    },
+    {
+      "id": "user-default",
+      "email": "trader@atfunding.com",
+      "name": "Alpha Trader",
+      "role": "user",
+      "kycStatus": "none",
+      "createdAt": "2026-06-30T05:31:50.119Z"
+    },
+    {
+      "id": "usr-664597",
+      "email": "tradelikeasjad@gmail.com",
+      "name": "Ajju",
+      "role": "user",
+      "kycStatus": "none",
+      "createdAt": "2026-06-30T10:09:51.790Z"
+    }
+  ],
+  "accounts": [
+    {
+      "id": "ACC-149302",
+      "userId": "usr-664597",
+      "userEmail": "tradelikeasjad@gmail.com",
+      "userName": "Ajju",
+      "challengeConfigId": "os-5k",
+      "challengeName": "ATFunding 5K Challenge (One-Step)",
+      "challengeSize": 5000,
+      "type": "one_step",
+      "status": "breached",
+      "breachedReason": "Account Reset & Breached by Administrative Directive",
+      "phase": "phase1",
+      "balance": 5000,
+      "initialBalance": 5000,
+      "peakBalance": 5000,
+      "startOfDayBalance": 5000,
+      "dailyDrawdownLimitValue": 200,
+      "maxDrawdownLimitValue": 400,
+      "payoutSharePercent": 80,
+      "createdAt": "2026-06-30T10:09:51.790Z",
+      "warningsCount": 0
+    },
+    {
+      "id": "ACC-892402",
+      "userId": "user-default",
+      "userEmail": "trader@atfunding.com",
+      "userName": "Alpha Trader",
+      "challengeConfigId": "ts-5k",
+      "challengeName": "ATFunding 5K Challenge (Two-Step)",
+      "challengeSize": 5000,
+      "type": "two_step",
+      "status": "breached",
+      "breachedReason": "Account Reset & Breached by Administrative Directive",
+      "phase": "phase1",
+      "balance": 5000,
+      "initialBalance": 5000,
+      "peakBalance": 5000,
+      "startOfDayBalance": 5000,
+      "dailyDrawdownLimitValue": 250,
+      "maxDrawdownLimitValue": 500,
+      "payoutSharePercent": 90,
+      "createdAt": "2026-06-30T05:31:50.120Z",
+      "warningsCount": 0
+    }
+  ],
+  "orders": [
+    {
+      "userId": "usr-664597",
+      "userEmail": "tradelikeasjad@gmail.com",
+      "userName": "Ajju",
+      "surname": "Hjb",
+      "phoneNumber": "090606",
+      "city": " J b",
+      "zipCode": " J b",
+      "country": "Vivj",
+      "challengeConfigId": "os-5k",
+      "challengeName": "ATFunding 5K Challenge (One-Step)",
+      "challengeSize": 5000,
+      "amount": 55,
+      "couponUsed": "",
+      "discount": 0,
+      "finalPrice": 55,
+      "id": "ORD-977520",
+      "status": "pending",
+      "accountId": "ACC-149302",
+      "createdAt": "2026-06-30T10:09:51.790Z"
+    }
+  ],
+  "trades": [],
+  "accountLogs": [
+    {
+      "id": "log-1",
+      "accountId": "ACC-892402",
+      "message": "Account initialized successfully. Phase 1 Evaluation started.",
+      "type": "info",
+      "timestamp": "2026-06-30T05:31:50.120Z"
+    },
+    {
+      "id": "log-reset-admin",
+      "accountId": "ACC-892402",
+      "message": "Account breached & reset by administrative directive.",
+      "type": "warning",
+      "timestamp": "2026-06-30T10:13:00.000Z"
+    }
+  ],
+  "payoutRequests": [],
+  "disabledSymbols": [],
+  "ruleViolations": []
+}
