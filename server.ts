@@ -527,14 +527,92 @@ function mirrorPricesForBackwardCompatibility() {
   }
 }
 
-async function fetchTwelveDataPrices() {
-  const apiKey = process.env.TWELVE_DATA_API_KEY;
-  if (!apiKey) {
-    console.warn('TWELVE_DATA_API_KEY is not defined in environment variables.');
-    isTwelveDataUnavailable = true;
-    return;
-  }
+const YAHOO_MAPPINGS: Record<string, string> = {
+  'EURUSD': 'EURUSD=X',
+  'GBPUSD': 'GBPUSD=X',
+  'USDJPY': 'USDJPY=X',
+  'USDCHF': 'USDCHF=X',
+  'USDCAD': 'USDCAD=X',
+  'AUDUSD': 'AUDUSD=X',
+  'NZDUSD': 'NZDUSD=X',
+  'EURJPY': 'EURJPY=X',
+  'GBPJPY': 'GBPJPY=X',
+  'EURGBP': 'EURGBP=X',
+  'AUDJPY': 'AUDJPY=X',
+  'CADJPY': 'CADJPY=X',
+  'CHFJPY': 'CHFJPY=X',
+  'EUR/USD': 'EURUSD=X',
+  'GBP/USD': 'GBPUSD=X',
+  'USD/JPY': 'USDJPY=X',
+  'XAUUSD': 'GC=F',
+  'GOLD': 'GC=F',
+  'XAGUSD': 'SI=F',
+  'US30': '^DJI',
+  'NAS100': '^IXIC',
+  'SPX500': '^GSPC',
+  'GER40': '^GDAXI',
+  'UK100': '^FTSE',
+  'JP225': '^N225',
+  'AUS200': '^AXJO',
+  'HK50': '^HSI',
+  'FRA40': '^FCHI',
+  'USOIL': 'CL=F',
+  'UKOIL': 'BZ=F',
+  'Natural Gas': 'NG=F',
+  'BTCUSD': 'BTC-USD',
+  'ETHUSD': 'ETH-USD',
+  'SOLUSD': 'SOL-USD',
+  'XRPUSD': 'XRP-USD',
+  'BNBUSD': 'BNB-USD',
+  'DOGEUSD': 'DOGE-USD',
+  'ADAUSD': 'ADA-USD',
+  'BTC/USD': 'BTC-USD'
+};
 
+async function fetchYahooFinancePrices(symbols: string[]) {
+  try {
+    const promises = symbols.map(async (symbol) => {
+      const yahooSymbol = YAHOO_MAPPINGS[symbol] || YAHOO_MAPPINGS[symbol.toUpperCase().replace('/', '')];
+      if (!yahooSymbol) return;
+
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}`;
+      const res = await fetch(url);
+      if (!res.ok) return;
+
+      const data = await res.json();
+      const result = data?.chart?.result?.[0];
+      if (!result) return;
+
+      const meta = result.meta;
+      const price = meta.regularMarketPrice;
+      const prevClose = meta.chartPreviousClose;
+
+      if (price !== undefined && price !== null) {
+        const high = result.indicators?.quote?.[0]?.high?.[0] || price * 1.005;
+        const low = result.indicators?.quote?.[0]?.low?.[0] || price * 0.995;
+        const changePercent = prevClose ? ((price - prevClose) / prevClose) * 100 : 0;
+
+        updateAssetPrice(
+          symbol,
+          price,
+          prevClose,
+          changePercent,
+          high,
+          low
+        );
+      }
+    });
+
+    await Promise.all(promises);
+    mirrorPricesForBackwardCompatibility();
+    // Mark live data as available because we successfully fetched real-time quotes!
+    isTwelveDataUnavailable = false;
+  } catch (error) {
+    console.warn('Error fetching fallback Yahoo Finance prices:', error);
+  }
+}
+
+async function fetchTwelveDataPrices() {
   // Collect unique symbols
   const symbolsSet = new Set<string>();
   
@@ -555,18 +633,27 @@ async function fetchTwelveDataPrices() {
     return;
   }
 
+  const symbolList = Array.from(symbolsSet);
+
+  const apiKey = process.env.TWELVE_DATA_API_KEY;
+  if (!apiKey) {
+    console.warn('TWELVE_DATA_API_KEY is not defined in environment variables. Falling back to Yahoo Finance.');
+    await fetchYahooFinancePrices(symbolList);
+    return;
+  }
+
   const now = Date.now();
   // Calculate rate-safe minimum interval based on credits requested (1 credit/7.5s, let's use 8500ms for safety)
   const minInterval = Math.max(13000, symbolsSet.size * 8500);
   if (now - lastTwelveDataFetchTime < minInterval) {
-    // Skip to respect Twelve Data API rate limits (max 8 requests/credits per minute)
+    // If it's within the interval, we still run Yahoo Finance to ensure absolute real-time updates!
+    await fetchYahooFinancePrices(symbolList);
     return;
   }
 
   // Optimistically set the last fetch time to block concurrent fetches
   lastTwelveDataFetchTime = now;
 
-  const symbolList = Array.from(symbolsSet);
   const mappedSymbols = symbolList.map(sym => mapToTwelveDataSymbol(sym));
   const symbolQuery = mappedSymbols.join(',');
 
@@ -575,8 +662,8 @@ async function fetchTwelveDataPrices() {
   try {
     const res = await fetch(url);
     if (res.status === 429) {
-      console.warn('Twelve Data API rate limit hit (429)');
-      isTwelveDataUnavailable = true;
+      console.warn('Twelve Data API rate limit hit (429). Falling back to Yahoo Finance.');
+      await fetchYahooFinancePrices(symbolList);
       return;
     }
 
@@ -587,8 +674,8 @@ async function fetchTwelveDataPrices() {
     const data = await res.json();
     
     if (data.status === 'error') {
-      console.warn('Twelve Data API response error:', data.message);
-      isTwelveDataUnavailable = true;
+      console.warn('Twelve Data API response error:', data.message, 'Falling back to Yahoo Finance.');
+      await fetchYahooFinancePrices(symbolList);
       return;
     }
 
@@ -618,8 +705,8 @@ async function fetchTwelveDataPrices() {
     mirrorPricesForBackwardCompatibility();
 
   } catch (error) {
-    console.warn('Error fetching Twelve Data prices:', error);
-    isTwelveDataUnavailable = true;
+    console.warn('Error fetching Twelve Data prices. Falling back to Yahoo Finance:', error);
+    await fetchYahooFinancePrices(symbolList);
   }
 }
 
