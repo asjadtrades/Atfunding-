@@ -121,6 +121,9 @@ export default function App() {
             setQuotes(data.quotes);
             setRuleViolations(data.ruleViolations || []);
             setLiveDataUnavailable(data.liveDataUnavailable || false);
+            if (data.coupons) {
+              setCoupons(data.coupons);
+            }
 
             // Update current logged-in user details if modified on server (e.g. KYC approved)
             if (currentUser) {
@@ -155,7 +158,7 @@ export default function App() {
     };
 
     fetchBackendState();
-    const interval = setInterval(fetchBackendState, 1000);
+    const interval = setInterval(fetchBackendState, 300);
     return () => clearInterval(interval);
   }, [activeTerminalAccount, currentUser]);
 
@@ -485,6 +488,9 @@ export default function App() {
         setPayoutRequests(data.payoutRequests);
         setQuotes(data.quotes);
         setRuleViolations(data.ruleViolations || []);
+        if (data.coupons) {
+          setCoupons(data.coupons);
+        }
 
         if (currentUser) {
           const freshUser = data.users.find((u: any) => u.id === currentUser.id);
@@ -811,13 +817,39 @@ export default function App() {
     }
   };
 
-  // COUPONS WORKFLOW (READ-ONLY ON FRONTEND)
-  const handleAddCoupon = (newCoupon: Coupon) => {
-    setCoupons(prev => [...prev, newCoupon]);
+  // COUPONS WORKFLOW
+  const handleAddCoupon = async (newCoupon: Coupon) => {
+    try {
+      const res = await fetch('/api/coupons', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newCoupon)
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        alert(`Coupon Error: ${err.error || 'Unknown error'}`);
+        return;
+      }
+      await syncStateWithServer();
+    } catch (e) {
+      console.error('Failed to add coupon:', e);
+    }
   };
 
-  const handleDeleteCoupon = (code: string) => {
-    setCoupons(prev => prev.filter(c => c.code !== code));
+  const handleDeleteCoupon = async (code: string) => {
+    try {
+      const res = await fetch(`/api/coupons/${encodeURIComponent(code)}`, {
+        method: 'DELETE'
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        alert(`Delete Coupon Error: ${err.error || 'Unknown error'}`);
+        return;
+      }
+      await syncStateWithServer();
+    } catch (e) {
+      console.error('Failed to delete coupon:', e);
+    }
   };
 
   // PAYOUTS WORKFLOW
@@ -1073,6 +1105,7 @@ export default function App() {
           activeOrders={orders}
           accounts={accounts}
           onNavigateToDashboard={() => setCurrentView('dashboard')}
+          coupons={coupons}
         />
       )}
 

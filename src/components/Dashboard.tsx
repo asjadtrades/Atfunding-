@@ -171,7 +171,9 @@ export default function Dashboard({
       alert('Please attach both the government ID and your selfie to submit KYC.');
       return;
     }
-    onSubmitKyc(kycIdType, 'simulated_id_document.jpg', 'simulated_selfie.jpg');
+    const finalIdFile = frontImage || 'https://images.unsplash.com/photo-1554774853-aae0a22c8aa4?w=500&auto=format&fit=crop&q=60';
+    const finalSelfieFile = selfieImage || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500&auto=format&fit=crop&q=60';
+    onSubmitKyc(kycIdType, finalIdFile, finalSelfieFile);
     setActiveTab('accounts');
   };
 
@@ -1776,7 +1778,7 @@ export default function Dashboard({
                 <div>
                   <p className="text-gray-500 uppercase font-mono text-[9px]">Rule Profile</p>
                   <p className="text-amber-500 font-semibold uppercase text-[10px]">
-                    30% Consistency & Drawdown Rules
+                    Risk & Drawdown Rules
                   </p>
                 </div>
               </div>

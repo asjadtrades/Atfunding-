@@ -158,6 +158,12 @@ interface RuleViolation {
   currentMarketPrice?: number;
 }
 
+interface Coupon {
+  code: string;
+  discountPercent: number;
+  description: string;
+}
+
 const DB_PATH = path.join(process.cwd(), 'db.json');
 
 // Default starting values
@@ -296,7 +302,10 @@ let dataStore = {
   accountLogs: [] as AccountLog[],
   payoutRequests: [] as PayoutRequest[],
   disabledSymbols: [] as string[],
-  ruleViolations: [] as RuleViolation[]
+  ruleViolations: [] as RuleViolation[],
+  coupons: [
+    { code: 'SAVE30', discountPercent: 30, description: '30% Off on all challenges' }
+  ] as Coupon[]
 };
 
 // Load database
@@ -311,6 +320,11 @@ function loadDatabase() {
           email: 'atgrowfund@gmail.com',
           password: '@Asjad.khan07'
         };
+      }
+      if (!dataStore.coupons || !Array.isArray(dataStore.coupons)) {
+        dataStore.coupons = [
+          { code: 'SAVE30', discountPercent: 30, description: '30% Off on all challenges' }
+        ];
       }
       console.log('Database loaded successfully from file.');
     } catch (e) {
@@ -718,9 +732,25 @@ function calculateAccountUsedMargin(accountId: string): number {
   return totalMargin;
 }
 
-// Tick loop (every 1 second)
+// Tick loop (every 300ms for smooth live updates like MT5/Exness)
 function runTickLoop() {
   setInterval(async () => {
+    // Flucluate prices slightly to simulate highly dynamic real-time live ticks (every 300ms)
+    currentQuotes = currentQuotes.map(q => {
+      const props = ASSET_PROPERTIES[q.symbol] || { tickSize: 0.00001, decimals: 5 };
+      const changeRange = props.tickSize * 2.5; // up to 2.5 ticks
+      const randomChange = (Math.random() - 0.5) * changeRange;
+      const newPrice = q.price + randomChange;
+      return {
+        ...q,
+        price: Number(newPrice.toFixed(props.decimals)),
+        high: Math.max(q.high, newPrice),
+        low: Math.min(q.low, newPrice)
+      };
+    });
+    // Mirror backward compatibility dual listings
+    mirrorPricesForBackwardCompatibility();
+
     // 2. Real-time trading execution matching engine & drawdown breach evaluation
     let stateChanged = false;
 
@@ -962,41 +992,8 @@ function runTickLoop() {
         return account;
       }
 
-      // 30% Consistency Rule Monitoring (applies to standard and instant accounts)
-      const closedForAcc = dataStore.trades.filter(t => t.accountId === account.id && t.status === 'closed');
-      const dayProfits: Record<string, number> = {};
-      closedForAcc.forEach(t => {
-        const day = (t.closedAt || t.createdAt || new Date().toISOString()).split('T')[0];
-        dayProfits[day] = (dayProfits[day] || 0) + t.profitLoss;
-      });
+      // 30% Consistency Rule Monitoring removed as requested by user
 
-      let consistencyTargetPercent = account.phase === 'phase1' ? 8 : account.phase === 'phase2' ? 5 : 0;
-      if (consistencyTargetPercent === 0) consistencyTargetPercent = 10; // default 10% target for funded/instant
-      const profitTargetValue = account.initialBalance * (consistencyTargetPercent / 100);
-      const maxAllowedDayProfit = profitTargetValue * 0.30;
-
-      let worstDay = '';
-      let worstDayProfit = 0;
-      for (const day of Object.keys(dayProfits)) {
-        if (dayProfits[day] > maxAllowedDayProfit) {
-          if (dayProfits[day] > worstDayProfit) {
-            worstDay = day;
-            worstDayProfit = dayProfits[day];
-          }
-        }
-      }
-
-      if (worstDayProfit > 0 && !account.flaggedForReview) {
-        const alreadyViolated = dataStore.ruleViolations && dataStore.ruleViolations.some(
-          v => v.accountId === account.id && v.violatedRule === "30% Consistency Rule" && v.date === worstDay
-        );
-        if (!alreadyViolated) {
-          stateChanged = true;
-          account.flaggedForReview = true;
-          account.reviewReason = `Single day profit ($${worstDayProfit.toFixed(2)}) on ${worstDay} exceeded 30% limit of ($${maxAllowedDayProfit.toFixed(2)})`;
-          triggerRuleViolation(account, "30% Consistency Rule", worstDayProfit, { equity, sumPL });
-        }
-      }
 
       // Check Phase Targets (For active evaluations only)
       const targetPercent = account.phase === 'phase1' ? 8 : account.phase === 'phase2' ? 5 : 0;
@@ -1165,7 +1162,7 @@ function runTickLoop() {
     if (stateChanged) {
       saveDatabase();
     }
-  }, 1000);
+  }, 300);
 
   // Poll external APIs every 10 seconds to keep feed updated with real world
   setInterval(() => {
@@ -1353,6 +1350,7 @@ async function startServer() {
       disabledSymbols: dataStore.disabledSymbols,
       quotes: currentQuotes,
       ruleViolations: dataStore.ruleViolations || [],
+      coupons: dataStore.coupons || [],
       liveDataUnavailable: isTwelveDataUnavailable
     });
   });
@@ -1781,13 +1779,16 @@ async function startServer() {
       amount: rawOrder.amount || 0,
       couponUsed: rawOrder.couponUsed || '',
       discount: rawOrder.discount || 0,
-      finalPrice: rawOrder.finalPrice || 0
+      finalPrice: rawOrder.finalPrice || 0,
+      transactionId: rawOrder.transactionId || '',
+      screenshotUrl: rawOrder.screenshotUrl || '',
+      recipientAddress: rawOrder.recipientAddress || ''
     };
 
     const accountId = `ACC-${Math.floor(100000 + Math.random() * 900000)}`;
     const newOrder: Order = {
       ...order,
-      id: `ORD-${Math.floor(100000 + Math.random() * 900000)}`,
+      id: rawOrder.id || `ORD-${Math.floor(100000 + Math.random() * 900000)}`,
       status: order.amount === 0 ? 'approved' : 'pending',
       accountId,
       createdAt: new Date().toISOString()
@@ -1844,6 +1845,40 @@ async function startServer() {
 
     saveDatabase();
     res.json({ success: true, order: newOrder, account: pendingAccount });
+  });
+
+  // COUPONS WORKFLOW API
+  app.post('/api/coupons', (req, res) => {
+    const { code, discountPercent, description } = req.body;
+    if (!code || !discountPercent) {
+      return res.status(400).json({ error: 'Code and discount percent are required.' });
+    }
+    const formattedCode = code.toUpperCase().trim();
+    if (!dataStore.coupons) {
+      dataStore.coupons = [];
+    }
+    const exists = dataStore.coupons.some(c => c.code === formattedCode);
+    if (exists) {
+      return res.status(400).json({ error: `Coupon ${formattedCode} already exists.` });
+    }
+    dataStore.coupons.push({
+      code: formattedCode,
+      discountPercent: Number(discountPercent),
+      description: description || `${discountPercent}% discount`
+    });
+    saveDatabase();
+    res.json({ success: true, coupons: dataStore.coupons });
+  });
+
+  app.delete('/api/coupons/:code', (req, res) => {
+    const { code } = req.params;
+    const formattedCode = code.toUpperCase().trim();
+    if (!dataStore.coupons) {
+      dataStore.coupons = [];
+    }
+    dataStore.coupons = dataStore.coupons.filter(c => c.code !== formattedCode);
+    saveDatabase();
+    res.json({ success: true, coupons: dataStore.coupons });
   });
 
   // ADMIN ACTIONS

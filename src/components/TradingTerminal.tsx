@@ -1239,9 +1239,6 @@ export default function TradingTerminal({
                                   <span className="text-gray-500">Lots:</span> <span className="text-gray-200">{p.lotSize}</span>
                                 </div>
                                 <div>
-                                  <span className="text-gray-500">SL/TP:</span> <span className="text-gray-200">{p.stopLoss || 'N/A'} / {p.takeProfit || 'N/A'}</span>
-                                </div>
-                                <div>
                                   <span className="text-gray-500">Entry:</span> <span className="text-gray-200">{p.entryPrice.toFixed(ASSET_PROPERTIES[p.asset]?.digits || 2)}</span>
                                 </div>
                                 <div>
@@ -1273,7 +1270,6 @@ export default function TradingTerminal({
                               <th className="pb-1">Lots</th>
                               <th className="pb-1">Entry</th>
                               <th className="pb-1">Current</th>
-                              <th className="pb-1">SL/TP</th>
                               <th className="pb-1 text-right">Profit/Loss</th>
                               <th className="pb-1 text-right">Action</th>
                             </tr>
@@ -1296,9 +1292,6 @@ export default function TradingTerminal({
                                   <td className="py-2 text-gray-300">{p.lotSize}</td>
                                   <td className="py-2 text-gray-300">{p.entryPrice.toFixed(ASSET_PROPERTIES[p.asset]?.digits || 2)}</td>
                                   <td className="py-2 text-gray-300">{p.currentPrice.toFixed(ASSET_PROPERTIES[p.asset]?.digits || 2)}</td>
-                                  <td className="py-2 text-gray-500">
-                                    {p.stopLoss || 'N/A'} / {p.takeProfit || 'N/A'}
-                                  </td>
                                   <td className="py-2 text-right">
                                     <div className={`font-bold ${isUp ? 'text-emerald-400' : 'text-red-400'}`}>
                                       ${p.profitLoss.toFixed(2)}
@@ -1454,9 +1447,6 @@ export default function TradingTerminal({
                               <div>
                                 <span className="text-gray-500">Trigger:</span> <span className="text-white font-bold">{p.triggerPrice}</span>
                               </div>
-                              <div className="col-span-2">
-                                <span className="text-gray-500">SL/TP:</span> <span className="text-gray-200">{p.stopLoss || 'N/A'} / {p.takeProfit || 'N/A'}</span>
-                              </div>
                             </div>
                             <div className="pt-1">
                               <button
@@ -1481,7 +1471,6 @@ export default function TradingTerminal({
                               <th className="pb-1">Direction</th>
                               <th className="pb-1">Lots</th>
                               <th className="pb-1">Trigger</th>
-                              <th className="pb-1">SL / TP</th>
                               <th className="pb-1 text-right">Action</th>
                             </tr>
                           </thead>
@@ -1498,7 +1487,6 @@ export default function TradingTerminal({
                                 </td>
                                 <td className="py-2 text-gray-300">{p.lotSize}</td>
                                 <td className="py-2 text-white font-bold">{p.triggerPrice}</td>
-                                <td className="py-2 text-gray-500">{p.stopLoss || 'N/A'} / {p.takeProfit || 'N/A'}</td>
                                 <td className="py-2 text-right">
                                   <button
                                     onClick={() => onCancelOrder(p.id)}
@@ -1540,36 +1528,11 @@ export default function TradingTerminal({
               )}
 
               {activeTab === 'rules' && (() => {
-                const targetPct = activeAccount.phase === 'phase1' ? 8 : activeAccount.phase === 'phase2' ? 5 : 10;
-                const targetVal = activeAccount.initialBalance * (targetPct / 100);
-                const maxDayProfitVal = targetVal * 0.30;
                 return (
                   <div className="space-y-3 py-2 text-left font-sans text-gray-300">
-                    {activeAccount.type === 'instant' && (
-                      <div className="bg-amber-500/10 border border-amber-500/20 p-3 rounded-lg">
-                        <p className="text-xs text-amber-400 font-mono font-bold uppercase mb-1">⚠️ 30% Consistency Rule (Active)</p>
-                        <p className="text-[11px] leading-relaxed text-gray-200">
-                          The maximum profit that can be made in a single trading day is limited to <strong>30% of your total profit target</strong>.
-                        </p>
-                        <div className="mt-2 grid grid-cols-2 gap-2 text-[10px] font-mono p-1.5 bg-[#0D1017] rounded border border-gray-900">
-                          <div>
-                            <span className="text-gray-500">PROFIT TARGET:</span>
-                            <p className="text-white font-bold">${targetVal.toLocaleString()}</p>
-                          </div>
-                          <div>
-                            <span className="text-gray-500">MAX DAY PROFIT:</span>
-                            <p className="text-amber-400 font-bold">${maxDayProfitVal.toLocaleString()}</p>
-                          </div>
-                        </div>
-                        <p className="text-[10px] leading-normal text-gray-400 mt-2">
-                          If you exceed the 30% day limit (exceeding ${maxDayProfitVal.toLocaleString()} in one day), the violation is recorded and flagged for Admin review. <strong>Your account will NOT be automatically breached.</strong>
-                        </p>
-                      </div>
-                    )}
-
                     <div className="bg-[#111622] p-3 rounded-lg border border-gray-800 text-[10px] leading-relaxed space-y-1">
                       <p className="font-bold text-white uppercase text-[10px] tracking-wider mb-1.5 font-mono">
-                        {activeAccount.type === 'instant' ? 'Other Trading Mandates:' : 'Trading Mandates:'}
+                        Trading Mandates:
                       </p>
                       <p>• <strong>Daily Drawdown Limit:</strong> 5% of starting balance per day.</p>
                       <p>• <strong>Max Cumulative Drawdown:</strong> 10% overall limit.</p>

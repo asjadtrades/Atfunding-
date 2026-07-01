@@ -212,6 +212,7 @@ export default function AdminPanel({
                     <th className="pb-3">Price</th>
                     <th className="pb-3">Discount</th>
                     <th className="pb-3">Final Amount</th>
+                    <th className="pb-3">Transaction Details</th>
                     <th className="pb-3">Order Date</th>
                     <th className="pb-3">Status</th>
                     <th className="pb-3 text-right pr-2">Actions</th>
@@ -220,7 +221,7 @@ export default function AdminPanel({
                 <tbody className="divide-y divide-gray-900">
                   {orders.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="py-6 text-center text-gray-500 font-mono">No purchase orders registered.</td>
+                      <td colSpan={10} className="py-6 text-center text-gray-500 font-mono">No purchase orders registered.</td>
                     </tr>
                   ) : (
                     orders.map((order) => (
@@ -335,6 +336,45 @@ export default function AdminPanel({
                         <td className="py-3 text-gray-400 font-mono">${order.amount}</td>
                         <td className="py-3 text-emerald-500 font-mono">-${order.discount} {order.couponUsed ? `(${order.couponUsed})` : ''}</td>
                         <td className="py-3 font-bold text-amber-400 font-mono">${order.finalPrice}</td>
+                        <td className="py-3">
+                          <div className="space-y-1 font-mono text-[10.5px]">
+                            <div className="flex gap-1 items-center">
+                              <span className="text-gray-500">Hash/ID:</span>
+                              <span className="text-amber-300 font-semibold break-all max-w-[140px] inline-block">
+                                {order.transactionId || 'None'}
+                              </span>
+                            </div>
+                            {order.recipientAddress && (
+                              <div className="flex gap-1 items-center">
+                                <span className="text-gray-500">To:</span>
+                                <span className="text-gray-400 truncate max-w-[140px] inline-block" title={order.recipientAddress}>
+                                  {order.recipientAddress}
+                                </span>
+                              </div>
+                            )}
+                            {order.screenshotUrl && (
+                              <div className="mt-1 flex items-center gap-1">
+                                <span className="text-gray-500">Receipt:</span>
+                                <a 
+                                  href={order.screenshotUrl} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer"
+                                  className="inline-block hover:opacity-80 transition-opacity border border-gray-800 rounded bg-black"
+                                >
+                                  <img 
+                                    src={order.screenshotUrl} 
+                                    alt="Receipt" 
+                                    className="h-8 w-12 object-cover rounded"
+                                    referrerPolicy="no-referrer"
+                                    onError={(e) => {
+                                      (e.target as HTMLImageElement).style.display = 'none';
+                                    }}
+                                  />
+                                </a>
+                              </div>
+                            )}
+                          </div>
+                        </td>
                         <td className="py-3 text-gray-500 font-mono">{new Date(order.createdAt).toLocaleDateString()}</td>
                         <td className="py-3">
                           <span className={`px-2 py-0.5 rounded font-semibold text-xxs font-mono ${
@@ -543,6 +583,7 @@ export default function AdminPanel({
                   <tr className="border-b border-gray-800 text-gray-500 font-mono uppercase text-xxs tracking-wider">
                     <th className="pb-3 pl-2">Name</th>
                     <th className="pb-3">Email Address</th>
+                    <th className="pb-3 text-center">Accounts</th>
                     <th className="pb-3">Permission Level</th>
                     <th className="pb-3">KYC Compliance</th>
                     <th className="pb-3">Registration Date</th>
@@ -550,10 +591,15 @@ export default function AdminPanel({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-900">
-                  {users.map((user) => (
-                    <tr key={user.id} className="hover:bg-gray-900/30">
-                      <td className="py-3 font-semibold text-white pl-2">{user.name}</td>
-                      <td className="py-3 font-mono text-gray-300">{user.email}</td>
+                  {users.map((user) => {
+                    const userAccountsCount = accounts.filter(a => a.userId === user.id).length;
+                    return (
+                      <tr key={user.id} className="hover:bg-gray-900/30">
+                        <td className="py-3 font-semibold text-white pl-2">{user.name}</td>
+                        <td className="py-3 font-mono text-gray-300">{user.email}</td>
+                        <td className="py-3 text-center font-bold text-amber-500 font-mono">
+                          {userAccountsCount}
+                        </td>
                       <td className="py-3">
                         <span className={`px-2 py-0.5 rounded font-semibold text-xxs font-mono ${
                           user.role === 'admin' ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20' : 'bg-gray-800 text-gray-400'
@@ -610,7 +656,8 @@ export default function AdminPanel({
                         )}
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1472,6 +1519,24 @@ export default function AdminPanel({
                               <span className="text-gray-400 text-[10px] break-all">{matchedOrder.recipientAddress}</span>
                             </div>
                           )}
+                          {matchedOrder.screenshotUrl && (
+                            <div className="mt-2 pt-1.5 border-t border-gray-900 flex flex-col">
+                              <span className="text-gray-500 block mb-1">Receipt Screenshot:</span>
+                              <a 
+                                href={matchedOrder.screenshotUrl} 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                className="inline-block self-start hover:opacity-90 transition-opacity"
+                              >
+                                <img 
+                                  src={matchedOrder.screenshotUrl} 
+                                  alt="Payment Screenshot" 
+                                  className="max-h-48 rounded border border-gray-800 object-contain bg-black"
+                                  referrerPolicy="no-referrer"
+                                />
+                              </a>
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
@@ -1608,7 +1673,11 @@ export default function AdminPanel({
                     <div className="bg-[#111622] rounded-xl border border-gray-900 overflow-hidden aspect-[4/3] flex items-center justify-center relative">
                       {selectedKycUser.kycIdFile ? (
                         <img 
-                          src={selectedKycUser.kycIdFile} 
+                          src={
+                            selectedKycUser.kycIdFile.startsWith('data:') || selectedKycUser.kycIdFile.startsWith('http')
+                              ? selectedKycUser.kycIdFile
+                              : "https://images.unsplash.com/photo-1554774853-aae0a22c8aa4?w=500&auto=format&fit=crop&q=60"
+                          } 
                           alt="Government ID Front" 
                           referrerPolicy="no-referrer"
                           className="w-full h-full object-cover"
@@ -1628,7 +1697,11 @@ export default function AdminPanel({
                     <div className="bg-[#111622] rounded-xl border border-gray-900 overflow-hidden aspect-[4/3] flex items-center justify-center relative">
                       {selectedKycUser.kycSelfieFile ? (
                         <img 
-                          src={selectedKycUser.kycSelfieFile} 
+                          src={
+                            selectedKycUser.kycSelfieFile.startsWith('data:') || selectedKycUser.kycSelfieFile.startsWith('http')
+                              ? selectedKycUser.kycSelfieFile
+                              : "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500&auto=format&fit=crop&q=60"
+                          } 
                           alt="Compliance Selfie" 
                           referrerPolicy="no-referrer"
                           className="w-full h-full object-cover"
