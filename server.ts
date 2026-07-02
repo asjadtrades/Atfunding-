@@ -473,7 +473,10 @@ function generateUniqueAccountId(): string {
 // Key: email (lowercased, trimmed), Value: { otp: string, expiresAt: number }
 const passwordResetOTPs = new Map<string, { otp: string; expiresAt: number }>();
 
-// Send OTP email helper function
+// Rate limiting store to prevent abuse (Key: email, Value: timestamp of last OTP request)
+const lastOTPRequestTimes = new Map<string, number>();
+
+// Send OTP email helper function with secure validation
 async function sendOTPEmail(email: string, otp: string): Promise<boolean> {
   const host = process.env.SMTP_HOST;
   const port = parseInt(process.env.SMTP_PORT || '587');
@@ -481,12 +484,13 @@ async function sendOTPEmail(email: string, otp: string): Promise<boolean> {
   const pass = process.env.SMTP_PASS;
   const from = process.env.SMTP_FROM || 'ATFunding <no-reply@atfunding.com>';
 
-  console.log(`[OTP Engine] Generated OTP ${otp} for ${email}`);
+  // Securely log the attempt (do NOT log the actual OTP value in production logs)
+  console.log(`[OTP Engine] Initiating secure OTP verification process for ${email}`);
 
-  // If credentials are not present, log to console as a fallback
+  // If credentials are not present, fail immediately. No fallbacks allowed.
   if (!host || !user || !pass) {
-    console.warn(`[OTP Engine] SMTP credentials are not fully configured in environment variables. Real email will not be sent, but you can read the OTP from server logs above.`);
-    return false; // Indicating it was not sent via real email but fallback printed to log
+    console.error(`[OTP Engine] Security Failure: SMTP credentials are not configured. Cannot send OTP.`);
+    return false;
   }
 
   try {
@@ -502,6 +506,9 @@ async function sendOTPEmail(email: string, otp: string): Promise<boolean> {
         rejectUnauthorized: false
       }
     });
+
+    // Verify SMTP connection and handshake
+    await transporter.verify();
 
     const mailOptions = {
       from,
@@ -534,10 +541,10 @@ async function sendOTPEmail(email: string, otp: string): Promise<boolean> {
     };
 
     const info = await transporter.sendMail(mailOptions);
-    console.log(`[OTP Engine] Real Email sent successfully to ${email}. Message ID: ${info.messageId}`);
+    console.log(`[OTP Engine] Real secure email successfully transmitted to recipient.`);
     return true;
   } catch (error) {
-    console.error(`[OTP Engine] Failed to send real email to ${email}:`, error);
+    console.error(`[OTP Engine] SMTP transmission error:`, error);
     return false;
   }
 }
@@ -1477,6 +1484,14 @@ async function startServer() {
       return res.status(400).json({ error: 'Email is required.' });
     }
     const cleanEmail = email.toLowerCase().trim();
+    
+    // Rate Limiting: Limit OTP requests to prevent abuse (60 seconds cooldown)
+    const lastRequestTime = lastOTPRequestTimes.get(cleanEmail);
+    if (lastRequestTime && Date.now() - lastRequestTime < 60000) {
+      const remainingSecs = Math.ceil((60000 - (Date.now() - lastRequestTime)) / 1000);
+      return res.status(429).json({ error: `Please wait ${remainingSecs} seconds before requesting a new OTP code.` });
+    }
+
     const adminEmail = (dataStore.adminConfig?.email || 'atgrowfund@gmail.com').toLowerCase().trim();
 
     // Verify if it is admin or a registered user
@@ -1499,12 +1514,18 @@ async function startServer() {
     // Send email using SMTP
     const sentRealEmail = await sendOTPEmail(cleanEmail, otp);
 
+    if (!sentRealEmail) {
+      // SMTP send failed or is unconfigured. Roll back and delete the stored OTP for security.
+      passwordResetOTPs.delete(cleanEmail);
+      return res.status(500).json({ error: 'Unable to send verification code. Please try again later.' });
+    }
+
+    // Update the last request timestamp on success
+    lastOTPRequestTimes.set(cleanEmail, Date.now());
+
     res.json({
       success: true,
-      sentRealEmail,
-      message: sentRealEmail 
-        ? 'A secure OTP code has been sent to your Gmail. Please enter it to verify.' 
-        : `An OTP code (${otp}) was generated. (Since SMTP is not fully configured, OTP is printed in server logs or can be entered directly: ${otp})`
+      message: 'A secure OTP code has been sent to your registered Gmail address. Please check your inbox or spam folder.'
     });
   });
 
