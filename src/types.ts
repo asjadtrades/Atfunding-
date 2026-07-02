@@ -68,6 +68,7 @@ export interface Order {
   userId: string;
   userEmail: string;
   userName: string;
+  referredBy?: string;
   surname?: string;
   phoneNumber?: string;
   city?: string;

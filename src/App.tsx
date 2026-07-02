@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   User, Account, Order, Trade, MarketQuote, Candle, Coupon, AccountLog, KycStatus, OrderType, TradeDirection, ChallengeConfig, PayoutRequest, RuleViolation,
   AffiliateProfile, AffiliateCommission, AffiliatePayoutRequest
@@ -88,6 +88,11 @@ export default function App() {
   // UI state
   const [showAuth, setShowAuth] = useState(false);
   const [activeTerminalAccount, setActiveTerminalAccount] = useState<Account | null>(null);
+  const activeTerminalAccountRef = useRef<Account | null>(null);
+  useEffect(() => {
+    activeTerminalAccountRef.current = activeTerminalAccount;
+  }, [activeTerminalAccount]);
+
   const [breachedAccountNotification, setBreachedAccountNotification] = useState<{ id: string; reason: string; message: string } | null>(null);
   const [warningAccountNotification, setWarningAccountNotification] = useState<{ id: string; reason: string; message: string } | null>(null);
 
@@ -164,11 +169,11 @@ export default function App() {
             }
 
             // Continuously track active terminal account
-            if (activeTerminalAccount) {
-              const freshAccount = data.accounts.find((a: any) => a.id === activeTerminalAccount.id);
+            if (activeTerminalAccountRef.current) {
+              const freshAccount = data.accounts.find((a: any) => a.id === activeTerminalAccountRef.current?.id);
               if (freshAccount) {
                 // Trigger active breach popups in real time
-                if (freshAccount.status === 'breached' && activeTerminalAccount.status !== 'breached') {
+                if (freshAccount.status === 'breached' && activeTerminalAccountRef.current?.status !== 'breached') {
                   setBreachedAccountNotification({
                     id: freshAccount.id,
                     reason: freshAccount.breachedReason || 'Evaluation suspended',

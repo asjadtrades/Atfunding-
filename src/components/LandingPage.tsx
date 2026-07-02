@@ -167,6 +167,7 @@ export default function LandingPage({
       userId: currentUser?.id || `anon-${Date.now()}`,
       userName: checkoutName,
       userEmail: checkoutEmail,
+      referredBy: localStorage.getItem('atfunding_referred_by') || undefined,
       surname: checkoutSurname,
       phoneNumber: checkoutPhone,
       city: checkoutCity,
