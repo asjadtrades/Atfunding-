@@ -433,80 +433,9 @@ function triggerRuleViolation(
   saveDatabase();
 }
 
-// Twelve Data API Integration variables
-let lastTwelveDataFetchTime = 0;
+// Market Data state variables
 let lastActiveSymbol = 'EUR/USD';
-let isTwelveDataUnavailable = false;
-
-function mapToTwelveDataSymbol(symbol: string): string {
-  const upper = symbol.toUpperCase().replace('/', '');
-  if (upper === 'GOLD' || upper === 'XAUUSD') return 'XAU/USD';
-  if (upper === 'SILVER' || upper === 'XAGUSD') return 'XAG/USD';
-  
-  // Forex: if 6 chars, insert / (e.g. EURUSD -> EUR/USD)
-  if (upper.length === 6 && ['EUR','GBP','USD','JPY','CHF','CAD','AUD','NZD'].includes(upper.slice(0,3))) {
-    return `${upper.slice(0,3)}/${upper.slice(3)}`;
-  }
-  
-  // Metals and crypto: if ends with USD and has 6 chars or more, insert /
-  if (upper.endsWith('USD') && upper.length > 3) {
-    const base = upper.substring(0, upper.length - 3);
-    return `${base}/USD`;
-  }
-
-  // Indices and commodities mappings
-  if (upper === 'US30') return 'DJI'; // Dow Jones
-  if (upper === 'NAS100') return 'IXIC'; // Nasdaq Composite
-  if (upper === 'SPX500') return 'SPX'; // S&P 500
-  if (upper === 'GER40') return 'DAX'; // Germany 40
-  if (upper === 'UK100') return 'FTSE'; // FTSE 100
-  if (upper === 'USOIL') return 'CL/USD'; // Crude Oil
-  if (upper === 'UKOIL') return 'LCO/USD'; // Brent Crude
-
-  // Default fallback
-  return symbol;
-}
-
-function findOriginalSymbolForMapped(mapped: string, originalList: string[]): string | undefined {
-  const normMapped = mapped.toUpperCase().replace('/', '');
-  for (const orig of originalList) {
-    const normOrig = orig.toUpperCase().replace('/', '');
-    
-    // Exact normalized matches
-    if (normOrig === normMapped) return orig;
-    
-    // Custom mappings
-    if (mapped === 'DJI' && normOrig === 'US30') return orig;
-    if (mapped === 'IXIC' && normOrig === 'NAS100') return orig;
-    if (mapped === 'SPX' && normOrig === 'SPX500') return orig;
-    if (mapped === 'DAX' && normOrig === 'GER40') return orig;
-    if (mapped === 'FTSE' && normOrig === 'UK100') return orig;
-    if (mapped === 'CL/USD' && normOrig === 'USOIL') return orig;
-    if (mapped === 'LCO/USD' && normOrig === 'UKOIL') return orig;
-    if (mapped === 'XAU/USD' && (normOrig === 'GOLD' || normOrig === 'XAUUSD')) return orig;
-  }
-  
-  return originalList.find(orig => orig.toUpperCase().replace('/', '') === normMapped);
-}
-
-function updateTwelveDataQuote(originalSymbol: string, item: any) {
-  const price = parseFloat(item.price || item.close);
-  if (isNaN(price)) return;
-
-  const prevClose = parseFloat(item.previous_close);
-  const changePercent = parseFloat(item.percent_change);
-  const high = parseFloat(item.high);
-  const low = parseFloat(item.low);
-
-  updateAssetPrice(
-    originalSymbol,
-    price,
-    isNaN(prevClose) ? undefined : prevClose,
-    isNaN(changePercent) ? undefined : changePercent,
-    isNaN(high) ? undefined : high,
-    isNaN(low) ? undefined : low
-  );
-}
+let isMarketDataUnavailable = false;
 
 function mirrorPricesForBackwardCompatibility() {
   for (const q1 of currentQuotes) {
@@ -548,7 +477,7 @@ const YAHOO_MAPPINGS: Record<string, string> = {
   'GOLD': 'GC=F',
   'XAGUSD': 'SI=F',
   'US30': '^DJI',
-  'NAS100': '^IXIC',
+  'NAS100': '^NDX',
   'SPX500': '^GSPC',
   'GER40': '^GDAXI',
   'UK100': '^FTSE',
@@ -569,28 +498,26 @@ const YAHOO_MAPPINGS: Record<string, string> = {
   'BTC/USD': 'BTC-USD'
 };
 
-async function fetchYahooFinancePrices(symbols: string[]) {
+async function fetchYahooPrices(symbols: string[]) {
   try {
     const promises = symbols.map(async (symbol) => {
       const yahooSymbol = YAHOO_MAPPINGS[symbol] || YAHOO_MAPPINGS[symbol.toUpperCase().replace('/', '')];
       if (!yahooSymbol) return;
 
-      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}`;
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}?interval=1d&range=1d`;
       const res = await fetch(url);
       if (!res.ok) return;
 
-      const data = await res.json();
-      const result = data?.chart?.result?.[0];
-      if (!result) return;
+      const data = await res.json() as any;
+      const meta = data?.chart?.result?.[0]?.meta;
+      if (!meta) return;
 
-      const meta = result.meta;
-      const price = meta.regularMarketPrice;
-      const prevClose = meta.chartPreviousClose;
-
-      if (price !== undefined && price !== null) {
-        const high = result.indicators?.quote?.[0]?.high?.[0] || price * 1.005;
-        const low = result.indicators?.quote?.[0]?.low?.[0] || price * 0.995;
-        const changePercent = prevClose ? ((price - prevClose) / prevClose) * 100 : 0;
+      const price = parseFloat(meta.regularMarketPrice);
+      if (price !== undefined && price !== null && !isNaN(price) && price > 0) {
+        const prevClose = parseFloat(meta.chartPreviousClose) || price;
+        const changePercent = ((price - prevClose) / prevClose) * 100;
+        const high = parseFloat(meta.regularMarketDayHigh) || price * 1.001;
+        const low = parseFloat(meta.regularMarketDayLow) || price * 0.999;
 
         updateAssetPrice(
           symbol,
@@ -605,23 +532,29 @@ async function fetchYahooFinancePrices(symbols: string[]) {
 
     await Promise.all(promises);
     mirrorPricesForBackwardCompatibility();
-    // Mark live data as available because we successfully fetched real-time quotes!
-    isTwelveDataUnavailable = false;
+    isMarketDataUnavailable = false;
   } catch (error) {
-    console.warn('Error fetching fallback Yahoo Finance prices:', error);
+    console.warn('Error fetching Yahoo prices:', error);
+    isMarketDataUnavailable = true;
   }
 }
 
-async function fetchTwelveDataPrices() {
-  // Collect unique symbols
+let lastMarketPriceFetchTime = 0;
+let lastAllSymbolsFetchTime = 0;
+
+async function updateMarketPrices() {
+  const now = Date.now();
+  if (now - lastMarketPriceFetchTime < 1000) {
+    return; // Rate limit to max once per second
+  }
+  lastMarketPriceFetchTime = now;
+
   const symbolsSet = new Set<string>();
   
-  // 1. Add currently selected chart symbol
   if (lastActiveSymbol) {
     symbolsSet.add(lastActiveSymbol);
   }
 
-  // 2. Add symbols with open positions
   const openTrades = dataStore.trades.filter(t => t.status === 'open' && t.orderType === 'market');
   for (const trade of openTrades) {
     if (trade.asset) {
@@ -629,93 +562,24 @@ async function fetchTwelveDataPrices() {
     }
   }
 
+  // Every 5 seconds, or if some quotes have a 0 price, fetch all initial quotes to keep everything fresh
+  if (now - lastAllSymbolsFetchTime > 5000 || currentQuotes.some(q => q.price === 0)) {
+    lastAllSymbolsFetchTime = now;
+    INITIAL_QUOTES.forEach(q => {
+      symbolsSet.add(q.symbol);
+    });
+  }
+
   if (symbolsSet.size === 0) {
     return;
   }
 
   const symbolList = Array.from(symbolsSet);
-
-  const apiKey = process.env.TWELVE_DATA_API_KEY;
-  if (!apiKey) {
-    console.warn('TWELVE_DATA_API_KEY is not defined in environment variables. Falling back to Yahoo Finance.');
-    await fetchYahooFinancePrices(symbolList);
-    return;
-  }
-
-  const now = Date.now();
-  // Calculate rate-safe minimum interval based on credits requested (1 credit/7.5s, let's use 8500ms for safety)
-  const minInterval = Math.max(13000, symbolsSet.size * 8500);
-  if (now - lastTwelveDataFetchTime < minInterval) {
-    // If it's within the interval, we still run Yahoo Finance to ensure absolute real-time updates!
-    await fetchYahooFinancePrices(symbolList);
-    return;
-  }
-
-  // Optimistically set the last fetch time to block concurrent fetches
-  lastTwelveDataFetchTime = now;
-
-  const mappedSymbols = symbolList.map(sym => mapToTwelveDataSymbol(sym));
-  const symbolQuery = mappedSymbols.join(',');
-
-  const url = `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(symbolQuery)}&apikey=${apiKey}`;
-
-  try {
-    const res = await fetch(url);
-    if (res.status === 429) {
-      console.warn('Twelve Data API rate limit hit (429). Falling back to Yahoo Finance.');
-      await fetchYahooFinancePrices(symbolList);
-      return;
-    }
-
-    if (!res.ok) {
-      throw new Error(`Twelve Data API HTTP error: ${res.status}`);
-    }
-
-    const data = await res.json();
-    
-    if (data.status === 'error') {
-      console.warn('Twelve Data API response error:', data.message, 'Falling back to Yahoo Finance.');
-      await fetchYahooFinancePrices(symbolList);
-      return;
-    }
-
-    isTwelveDataUnavailable = false;
-
-    // Process Twelve Data response
-    if (data.symbol) {
-      // Single symbol response
-      const originalSym = findOriginalSymbolForMapped(data.symbol, symbolList);
-      if (originalSym) {
-        updateTwelveDataQuote(originalSym, data);
-      }
-    } else {
-      // Multiple symbols response
-      for (const key of Object.keys(data)) {
-        const item = data[key];
-        if (item && item.symbol) {
-          const originalSym = findOriginalSymbolForMapped(item.symbol, symbolList);
-          if (originalSym) {
-            updateTwelveDataQuote(originalSym, item);
-          }
-        }
-      }
-    }
-
-    // Since we successfully fetched, make sure we mirror prices for dual slash listings
-    mirrorPricesForBackwardCompatibility();
-
-  } catch (error) {
-    console.warn('Error fetching Twelve Data prices. Falling back to Yahoo Finance:', error);
-    await fetchYahooFinancePrices(symbolList);
-  }
+  await fetchYahooPrices(symbolList);
 }
 
 // Live quotes state
 let currentQuotes: MarketQuote[] = [...INITIAL_QUOTES];
-
-async function updateMarketPrices() {
-  await fetchTwelveDataPrices();
-}
 
 function updateAssetPrice(
   symbol: string,
@@ -759,6 +623,110 @@ function updateAssetPrice(
   }
 }
 
+// Helper to convert quote currency to USD for profit/loss calculation
+function getQuoteToUSDExchangeRate(symbol: string): number {
+  const symbolClean = symbol.toUpperCase().replace('/', '');
+  
+  const defaults: Record<string, number> = {
+    USDJPY: 156.45,
+    USDCHF: 0.89,
+    USDCAD: 1.37,
+    GBPUSD: 1.265,
+    EURUSD: 1.0845,
+    AUDUSD: 0.665,
+    NZDUSD: 0.612,
+  };
+
+  const getQuotePrice = (sym: string) => {
+    const q = currentQuotes.find(c => c.symbol.toUpperCase().replace('/', '') === sym);
+    return q ? q.price : (defaults[sym] || 1.0);
+  };
+
+  if (symbolClean.endsWith('JPY') || symbolClean === 'JP225') {
+    return 1.0 / getQuotePrice('USDJPY');
+  }
+  if (symbolClean.endsWith('CHF')) {
+    return 1.0 / getQuotePrice('USDCHF');
+  }
+  if (symbolClean.endsWith('CAD')) {
+    return 1.0 / getQuotePrice('USDCAD');
+  }
+  if (symbolClean.endsWith('GBP') || symbolClean === 'UK100') {
+    return getQuotePrice('GBPUSD');
+  }
+  if (symbolClean.endsWith('EUR') || symbolClean === 'GER40' || symbolClean === 'FRA40') {
+    return getQuotePrice('EURUSD');
+  }
+  if (symbolClean.endsWith('AUD') || symbolClean === 'AUS200') {
+    return getQuotePrice('AUDUSD');
+  }
+  if (symbolClean === 'HK50') {
+    return 1.0 / 7.8;
+  }
+
+  return 1.0;
+}
+
+// Helper to convert base currency to USD for margin calculation
+function getBaseToUSDExchangeRate(symbol: string): number {
+  const symbolClean = symbol.toUpperCase().replace('/', '');
+  
+  const defaults: Record<string, number> = {
+    USDJPY: 156.45,
+    USDCHF: 0.89,
+    USDCAD: 1.37,
+    GBPUSD: 1.265,
+    EURUSD: 1.0845,
+    AUDUSD: 0.665,
+    NZDUSD: 0.612,
+  };
+
+  const getQuotePrice = (sym: string) => {
+    const q = currentQuotes.find(c => c.symbol.toUpperCase().replace('/', '') === sym);
+    return q ? q.price : (defaults[sym] || 1.0);
+  };
+
+  if (
+    symbolClean.startsWith('XAU') || symbolClean === 'GOLD' ||
+    symbolClean.startsWith('XAG') ||
+    symbolClean.startsWith('BTC') ||
+    symbolClean.startsWith('ETH') ||
+    symbolClean.startsWith('SOL') ||
+    symbolClean.startsWith('XRP') ||
+    symbolClean.startsWith('BNB') ||
+    symbolClean.startsWith('DOGE') ||
+    symbolClean.startsWith('ADA') ||
+    ['US30', 'NAS100', 'SPX500', 'GER40', 'UK100', 'JP225', 'AUS200', 'HK50', 'FRA40', 'USOIL', 'UKOIL', 'NATURALGAS'].includes(symbolClean)
+  ) {
+    const assetQuote = currentQuotes.find(c => c.symbol.toUpperCase().replace('/', '') === symbolClean);
+    return assetQuote ? assetQuote.price : 1.0;
+  }
+
+  if (symbolClean.startsWith('USD')) {
+    return 1.0;
+  }
+  if (symbolClean.startsWith('EUR')) {
+    return getQuotePrice('EURUSD');
+  }
+  if (symbolClean.startsWith('GBP')) {
+    return getQuotePrice('GBPUSD');
+  }
+  if (symbolClean.startsWith('AUD')) {
+    return getQuotePrice('AUDUSD');
+  }
+  if (symbolClean.startsWith('NZD')) {
+    return getQuotePrice('NZDUSD');
+  }
+  if (symbolClean.startsWith('CAD')) {
+    return 1.0 / getQuotePrice('USDCAD');
+  }
+  if (symbolClean.startsWith('CHF')) {
+    return 1.0 / getQuotePrice('USDCHF');
+  }
+
+  return 1.0;
+}
+
 // Dynamically calculates trade profit/loss and converts it to USD according to asset quote currency
 function calculateLivePnL(trade: any, closePrice: number): number {
   const asset = trade.asset;
@@ -772,37 +740,15 @@ function calculateLivePnL(trade: any, closePrice: number): number {
     profitLoss = (trade.entryPrice - closePrice) * trade.lotSize * contractSize;
   }
 
-  // Convert Quote Currency to USD
-  const upperAsset = asset.toUpperCase().replace('/', '');
-  
-  if (upperAsset.endsWith('JPY')) {
-    // Convert JPY profit to USD by dividing by USD/JPY current price
-    const usdjpy = currentQuotes.find(q => q.symbol === 'USD/JPY' || q.symbol === 'USDJPY');
-    const rate = usdjpy ? usdjpy.price : 156.45;
-    profitLoss = profitLoss / rate;
-  } else if (upperAsset.endsWith('CHF')) {
-    const usdchf = currentQuotes.find(q => q.symbol === 'USD/CHF' || q.symbol === 'USDCHF');
-    const rate = usdchf ? usdchf.price : 0.89;
-    profitLoss = profitLoss / rate;
-  } else if (upperAsset.endsWith('CAD')) {
-    const usdcad = currentQuotes.find(q => q.symbol === 'USD/CAD' || q.symbol === 'USDCAD');
-    const rate = usdcad ? usdcad.price : 1.37;
-    profitLoss = profitLoss / rate;
-  } else if (upperAsset.endsWith('GBP')) {
-    const gbpusd = currentQuotes.find(q => q.symbol === 'GBP/USD' || q.symbol === 'GBPUSD');
-    const rate = gbpusd ? gbpusd.price : 1.265;
-    profitLoss = profitLoss * rate;
-  }
+  // Convert Quote Currency to USD with 100% MT5 accuracy
+  const conversionRate = getQuoteToUSDExchangeRate(asset);
+  profitLoss = profitLoss * conversionRate;
 
   return Math.round(profitLoss * 100) / 100;
 }
 
-function getUSDPriceForAsset(asset: string, currentPrice: number): number {
-  const upper = asset.toUpperCase().replace('/', '');
-  if (upper.startsWith('USD') && (upper.endsWith('JPY') || upper.endsWith('CHF') || upper.endsWith('CAD'))) {
-    return 1.0;
-  }
-  return currentPrice;
+function getUSDPriceForAsset(asset: string, currentPrice?: number): number {
+  return getBaseToUSDExchangeRate(asset);
 }
 
 function calculateAccountUsedMargin(accountId: string): number {
@@ -810,8 +756,7 @@ function calculateAccountUsedMargin(accountId: string): number {
   let totalMargin = 0;
   for (const trade of openTrades) {
     const props = ASSET_PROPERTIES[trade.asset] || { contractSize: 100000 };
-    const price = trade.entryPrice;
-    const usdPrice = getUSDPriceForAsset(trade.asset, price);
+    const usdPrice = getUSDPriceForAsset(trade.asset);
     const tradeLeverage = trade.leverage || 100;
     const requiredMargin = (trade.lotSize * props.contractSize * usdPrice) / tradeLeverage;
     totalMargin += requiredMargin;
@@ -822,20 +767,7 @@ function calculateAccountUsedMargin(accountId: string): number {
 // Tick loop (every 300ms for smooth live updates like MT5/Exness)
 function runTickLoop() {
   setInterval(async () => {
-    // Flucluate prices slightly to simulate highly dynamic real-time live ticks (every 300ms)
-    currentQuotes = currentQuotes.map(q => {
-      const props = ASSET_PROPERTIES[q.symbol] || { tickSize: 0.00001, decimals: 5 };
-      const changeRange = props.tickSize * 2.5; // up to 2.5 ticks
-      const randomChange = (Math.random() - 0.5) * changeRange;
-      const newPrice = q.price + randomChange;
-      return {
-        ...q,
-        price: Number(newPrice.toFixed(props.decimals)),
-        high: Math.max(q.high, newPrice),
-        low: Math.min(q.low, newPrice)
-      };
-    });
-    // Mirror backward compatibility dual listings
+    // Mirror backward compatibility dual listings (e.g. GOLD <-> XAUUSD)
     mirrorPricesForBackwardCompatibility();
 
     // 2. Real-time trading execution matching engine & drawdown breach evaluation
@@ -859,10 +791,9 @@ function runTickLoop() {
       const contractSize = props.contractSize;
       const tickSize = props.tickSize;
       const tickValue = props.tickValue;
-
       const currentPrice = quote.price;
-      const askPrice = currentPrice + (spread / 2);
-      const bidPrice = currentPrice - (spread / 2);
+      const askPrice = currentPrice;
+      const bidPrice = currentPrice;
 
       // Check limit/stop orders
       if (trade.orderType !== 'market' && trade.triggerPrice !== undefined) {
@@ -871,22 +802,22 @@ function runTickLoop() {
         let fillPrice = trigger;
 
         if (trade.orderType === 'limit') {
-          if (trade.direction === 'buy' && askPrice <= trigger) {
+          if (trade.direction === 'buy' && currentPrice <= trigger) {
             fill = true;
-            fillPrice = askPrice;
+            fillPrice = trigger;
           }
-          if (trade.direction === 'sell' && bidPrice >= trigger) {
+          if (trade.direction === 'sell' && currentPrice >= trigger) {
             fill = true;
-            fillPrice = bidPrice;
+            fillPrice = trigger;
           }
         } else if (trade.orderType === 'stop') {
-          if (trade.direction === 'buy' && askPrice >= trigger) {
+          if (trade.direction === 'buy' && currentPrice >= trigger) {
             fill = true;
-            fillPrice = askPrice;
+            fillPrice = trigger;
           }
-          if (trade.direction === 'sell' && bidPrice <= trigger) {
+          if (trade.direction === 'sell' && currentPrice <= trigger) {
             fill = true;
-            fillPrice = bidPrice;
+            fillPrice = trigger;
           }
         }
 
@@ -941,9 +872,8 @@ function runTickLoop() {
         return trade;
       }
 
-      // Track live position profit/loss using standard Bid/Ask closing prices
-      // BUY positions close at Bid. SELL positions close at Ask.
-      const closePrice = trade.direction === 'buy' ? bidPrice : askPrice;
+      // Track live position profit/loss using standard close price (matching the live chart)
+      const closePrice = currentPrice;
 
       let profitLoss = calculateLivePnL(trade, closePrice);
 
@@ -954,11 +884,11 @@ function runTickLoop() {
 
       // Stop Loss checks
       if (trade.stopLoss !== undefined && trade.stopLoss !== null) {
-        if (trade.direction === 'buy' && bidPrice <= trade.stopLoss) {
+        if (trade.direction === 'buy' && currentPrice <= trade.stopLoss) {
           shouldClose = true;
           closeReason = 'sl';
           exitPrice = trade.stopLoss;
-        } else if (trade.direction === 'sell' && askPrice >= trade.stopLoss) {
+        } else if (trade.direction === 'sell' && currentPrice >= trade.stopLoss) {
           shouldClose = true;
           closeReason = 'sl';
           exitPrice = trade.stopLoss;
@@ -967,11 +897,11 @@ function runTickLoop() {
 
       // Take Profit checks
       if (trade.takeProfit !== undefined && trade.takeProfit !== null) {
-        if (trade.direction === 'buy' && bidPrice >= trade.takeProfit) {
+        if (trade.direction === 'buy' && currentPrice >= trade.takeProfit) {
           shouldClose = true;
           closeReason = 'tp';
           exitPrice = trade.takeProfit;
-        } else if (trade.direction === 'sell' && askPrice <= trade.takeProfit) {
+        } else if (trade.direction === 'sell' && currentPrice <= trade.takeProfit) {
           shouldClose = true;
           closeReason = 'tp';
           exitPrice = trade.takeProfit;
@@ -1099,7 +1029,7 @@ function runTickLoop() {
             dataStore.accountLogs.push({
               id: `log-${Date.now()}`,
               accountId: account.id,
-              message: `CONGRATULATIONS! You passed the Phase 1 Target. Official Phase 1 certificate generated!`,
+              message: `CONGRATULATIONS! You passed the Phase 1 Target. Your account is progressing to Funded!`,
               type: 'success',
               timestamp: new Date().toISOString()
             });
@@ -1115,7 +1045,7 @@ function runTickLoop() {
               challengeName: account.challengeName.replace('Phase 1', 'Funded').replace('(One-Step)', 'Funded'),
               challengeSize: account.challengeSize,
               type: account.type as any,
-              status: 'pending_payment', // Pending activation
+              status: 'active', // Activated instantly because payment is already completed during purchase
               phase: 'funded',
               balance: account.challengeSize,
               initialBalance: account.challengeSize,
@@ -1131,7 +1061,7 @@ function runTickLoop() {
             dataStore.accountLogs.push({
               id: `log-${Date.now()}-funded`,
               accountId: fundedAccountId,
-              message: `Funded live trading account created automatically (Pending activation).`,
+              message: `Funded live trading account created automatically (Activated immediately).`,
               type: 'info',
               timestamp: new Date().toISOString()
             });
@@ -1141,12 +1071,12 @@ function runTickLoop() {
             dataStore.accountLogs.push({
               id: `log-${Date.now()}`,
               accountId: account.id,
-              message: `CONGRATULATIONS! You passed the Phase 1 Target. Official Phase 1 certificate generated!`,
+              message: `CONGRATULATIONS! You passed the Phase 1 Target. Your account has progressed to Phase 2 (Awaiting activation)!`,
               type: 'success',
               timestamp: new Date().toISOString()
             });
 
-            // Automatically create Phase 2 account with pending_payment status
+            // Automatically create Phase 2 account
             const phase2AccountId = `ACC-${Math.floor(100000 + Math.random() * 900000)}`;
             const phase2Account: Account = {
               id: phase2AccountId,
@@ -1157,7 +1087,7 @@ function runTickLoop() {
               challengeName: account.challengeName.replace('Phase 1', 'Phase 2').replace('(One-Step)', '(Two-Step) Phase 2'),
               challengeSize: account.challengeSize,
               type: account.type as any,
-              status: 'pending_payment', // Pending activation as requested
+              status: 'active', // Active immediately because payment is already completed (or starting free in pass_pay_later evaluation)
               phase: 'phase2',
               balance: account.challengeSize,
               initialBalance: account.challengeSize,
@@ -1173,7 +1103,7 @@ function runTickLoop() {
             dataStore.accountLogs.push({
               id: `log-${Date.now()}-p2`,
               accountId: phase2AccountId,
-              message: `Phase 2 evaluation account created automatically (Pending activation).`,
+              message: `Phase 2 evaluation account created automatically (Activated immediately).`,
               type: 'info',
               timestamp: new Date().toISOString()
             });
@@ -1184,12 +1114,13 @@ function runTickLoop() {
           dataStore.accountLogs.push({
             id: `log-${Date.now()}`,
             accountId: account.id,
-            message: `CONGRATULATIONS! You passed the Phase 2 Target. Official Phase 2 certificate generated!`,
+            message: `CONGRATULATIONS! You passed the Phase 2 Target. Your account has progressed to Funded!`,
             type: 'success',
             timestamp: new Date().toISOString()
           });
 
-          // Automatically create Funded account with pending_payment status
+          // Automatically create Funded account. Only Pay Later Plan gets 'pending_payment'.
+          const isPayLater = account.type === 'pass_pay_later';
           const fundedAccountId = `ACC-${Math.floor(100000 + Math.random() * 900000)}`;
           const fundedAccount: Account = {
             id: fundedAccountId,
@@ -1200,7 +1131,7 @@ function runTickLoop() {
             challengeName: account.challengeName.replace('Phase 2', 'Funded'),
             challengeSize: account.challengeSize,
             type: account.type as any,
-            status: 'pending_payment', // Pending activation
+            status: isPayLater ? 'pending_payment' : 'active',
             phase: 'funded',
             balance: account.challengeSize,
             initialBalance: account.challengeSize,
@@ -1216,7 +1147,9 @@ function runTickLoop() {
           dataStore.accountLogs.push({
             id: `log-${Date.now()}-funded`,
             accountId: fundedAccountId,
-            message: `Funded live trading account created automatically (Pending activation).`,
+            message: isPayLater 
+              ? `Funded live trading account created automatically (Pending success fee payment).`
+              : `Funded live trading account created automatically (Activated immediately).`,
             type: 'info',
             timestamp: new Date().toISOString()
           });
@@ -1251,10 +1184,10 @@ function runTickLoop() {
     }
   }, 300);
 
-  // Poll external APIs every 10 seconds to keep feed updated with real world
+  // Poll external APIs every 1 second to keep feed updated with real world
   setInterval(() => {
     updateMarketPrices();
-  }, 10000);
+  }, 1000);
 }
 
 // Initialize database & ticker
@@ -1265,7 +1198,8 @@ runTickLoop();
 // Create application
 async function startServer() {
   const app = express();
-  app.use(express.json());
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
   // API Endpoints
   app.post('/api/auth/login', (req, res) => {
@@ -1423,8 +1357,8 @@ async function startServer() {
       lastActiveSymbol = activeSymbolParam;
     }
 
-    fetchTwelveDataPrices().catch(err => {
-      console.warn('[Background Twelve Data Fetch Error]:', err);
+    updateMarketPrices().catch(err => {
+      console.warn('[Background Market Price Fetch Error]:', err);
     });
 
     res.json({
@@ -1438,8 +1372,92 @@ async function startServer() {
       quotes: currentQuotes,
       ruleViolations: dataStore.ruleViolations || [],
       coupons: dataStore.coupons || [],
-      liveDataUnavailable: isTwelveDataUnavailable
+      liveDataUnavailable: isMarketDataUnavailable
     });
+  });
+
+  // HISTORICAL CANDLES FROM YAHOO FINANCE
+  app.get('/api/candles/:symbol', async (req, res) => {
+    const { symbol } = req.params;
+    const timeframe = (req.query.timeframe as string) || '1m';
+    
+    let interval = '1m';
+    let range = '1d';
+    if (timeframe === '5m') {
+      interval = '5m';
+      range = '1d';
+    } else if (timeframe === '15m') {
+      interval = '15m';
+      range = '5d';
+    } else if (timeframe === '1H') {
+      interval = '1h';
+      range = '30d';
+    } else if (timeframe === '4H') {
+      interval = '1h';
+      range = '60d';
+    } else if (timeframe === '1D') {
+      interval = '1d';
+      range = '1y';
+    }
+
+    const yahooSymbol = YAHOO_MAPPINGS[symbol] || YAHOO_MAPPINGS[symbol.toUpperCase().replace('/', '')] || symbol;
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yahooSymbol)}?interval=${interval}&range=${range}`;
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        return res.status(404).json({ error: `Failed to fetch candles for ${symbol}` });
+      }
+      const data = await response.json() as any;
+      const result = data?.chart?.result?.[0];
+      const timestamps = result?.timestamp || [];
+      const quote = result?.indicators?.quote?.[0] || {};
+      const opens = quote.open || [];
+      const highs = quote.high || [];
+      const lows = quote.low || [];
+      const closes = quote.close || [];
+      const volumes = quote.volume || [];
+
+      const candles: any[] = [];
+      for (let i = 0; i < timestamps.length; i++) {
+        const o = opens[i];
+        const h = highs[i];
+        const l = lows[i];
+        const c = closes[i];
+        const v = volumes[i] || 0;
+        
+        if (o !== null && o !== undefined && h !== null && h !== undefined && l !== null && l !== undefined && c !== null && c !== undefined && o > 0) {
+          candles.push({
+            time: timestamps[i],
+            open: parseFloat(o),
+            high: parseFloat(h),
+            low: parseFloat(l),
+            close: parseFloat(c),
+            volume: parseFloat(v)
+          });
+        }
+      }
+
+      if (timeframe === '4H' && candles.length > 0) {
+        const aggregatedCandles: any[] = [];
+        for (let i = 0; i < candles.length; i += 4) {
+          const chunk = candles.slice(i, i + 4);
+          const open = chunk[0].open;
+          const close = chunk[chunk.length - 1].close;
+          const high = Math.max(...chunk.map(c => c.high));
+          const low = Math.min(...chunk.map(c => c.low));
+          const volume = chunk.reduce((sum, c) => sum + c.volume, 0);
+          const time = chunk[0].time;
+          aggregatedCandles.push({ time, open, high, low, close, volume });
+        }
+        return res.json(aggregatedCandles);
+      }
+
+      res.json(candles);
+    } catch (error) {
+      console.error(`Error in candles api for ${symbol}:`, error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
   });
 
   // PLACE TRADE
@@ -1449,6 +1467,33 @@ async function startServer() {
     const account = dataStore.accounts.find(a => a.id === accountId);
     if (!account) return res.status(404).json({ error: 'Account not found' });
     if (account.status === 'breached') return res.status(400).json({ error: 'Account is breached and suspended.' });
+
+    // Enforce Risk Management Lot Size Rules
+    if (account.challengeSize === 5000 && lotSize > 0.50) {
+      account.flaggedForReview = true;
+      account.reviewReason = `Rule Violation Attempt: Lot size ${lotSize} on 5K account (Limit: 0.50)`;
+      
+      const openForAcc = dataStore.trades.filter(t => t.accountId === account.id && t.status === 'open' && t.orderType === 'market');
+      const sumPL = openForAcc.reduce((accVal, curr) => accVal + curr.profitLoss, 0);
+      const equity = account.balance + sumPL;
+      triggerRuleViolation(account, "Max Lot Size Limit Attempt", lotSize, { equity, sumPL }, { symbol: asset });
+      
+      saveDatabase();
+      return res.status(400).json({ error: "Maximum allowed lot size for 5K account is 0.50 lot." });
+    }
+
+    if (account.challengeSize === 10000 && lotSize > 1.00) {
+      account.flaggedForReview = true;
+      account.reviewReason = `Rule Violation Attempt: Lot size ${lotSize} on 10K account (Limit: 1.00)`;
+      
+      const openForAcc = dataStore.trades.filter(t => t.accountId === account.id && t.status === 'open' && t.orderType === 'market');
+      const sumPL = openForAcc.reduce((accVal, curr) => accVal + curr.profitLoss, 0);
+      const equity = account.balance + sumPL;
+      triggerRuleViolation(account, "Max Lot Size Limit Attempt", lotSize, { equity, sumPL }, { symbol: asset });
+      
+      saveDatabase();
+      return res.status(400).json({ error: "Maximum allowed lot size for 10K account is 1.00 lot." });
+    }
 
     // Leverage cooling down trade intervals (15 minutes check) - warning recorded, trade still allowed!
     const lastTrade = dataStore.trades.find(t => t.accountId === accountId);
@@ -1496,9 +1541,7 @@ async function startServer() {
     }
 
     // Bid Ask spreading
-    const entryPrice = direction === 'buy'
-      ? quote.price + (spread / 2)
-      : quote.price - (spread / 2);
+    const entryPrice = quote.price;
 
     const leverageSetting = userLeverage ? parseInt(userLeverage) : 100;
     const usdPrice = getUSDPriceForAsset(asset, entryPrice);
@@ -1577,9 +1620,7 @@ async function startServer() {
     const tickValue = props.tickValue;
 
     const currentPrice = quote.price;
-    const currentBidPrice = currentPrice - (spread / 2);
-    const currentAskPrice = currentPrice + (spread / 2);
-    const closePrice = trade.direction === 'buy' ? currentBidPrice : currentAskPrice;
+    const closePrice = currentPrice;
 
     // Handle partial closure
     const closedLots = partialLotSize ? Math.min(partialLotSize, trade.lotSize) : trade.lotSize;
@@ -2053,7 +2094,7 @@ async function startServer() {
           challengeName: account.challengeName.replace('Phase 1', 'Funded').replace('(One-Step)', 'Funded'),
           challengeSize: account.challengeSize,
           type: account.type as any,
-          status: 'pending_payment',
+          status: 'active', // Active immediately because payment is already completed during purchase
           phase: 'funded',
           balance: account.challengeSize,
           initialBalance: account.challengeSize,
@@ -2069,7 +2110,7 @@ async function startServer() {
         dataStore.accountLogs.push({
           id: `log-${Date.now()}-admin-funded`,
           accountId: fundedAccountId,
-          message: `Funded live trading account created automatically (Pending activation).`,
+          message: `Funded live trading account created automatically (Activated immediately).`,
           type: 'info',
           timestamp: new Date().toISOString()
         });
@@ -2084,7 +2125,7 @@ async function startServer() {
           challengeName: account.challengeName.replace('Phase 1', 'Phase 2').replace('(One-Step)', '(Two-Step) Phase 2'),
           challengeSize: account.challengeSize,
           type: account.type as any,
-          status: 'pending_payment',
+          status: 'active', // Active immediately
           phase: 'phase2',
           balance: account.challengeSize,
           initialBalance: account.challengeSize,
@@ -2100,12 +2141,13 @@ async function startServer() {
         dataStore.accountLogs.push({
           id: `log-${Date.now()}-admin-p2`,
           accountId: phase2AccountId,
-          message: `Phase 2 evaluation account created automatically (Pending activation).`,
+          message: `Phase 2 evaluation account created automatically (Activated immediately).`,
           type: 'info',
           timestamp: new Date().toISOString()
         });
       }
     } else if (status === 'passed_phase2' && oldStatus !== 'passed_phase2') {
+      const isPayLater = account.type === 'pass_pay_later';
       const fundedAccountId = `ACC-${Math.floor(100000 + Math.random() * 900000)}`;
       const fundedAccount: Account = {
         id: fundedAccountId,
@@ -2116,7 +2158,7 @@ async function startServer() {
         challengeName: account.challengeName.replace('Phase 2', 'Funded'),
         challengeSize: account.challengeSize,
         type: account.type as any,
-        status: 'pending_payment',
+        status: isPayLater ? 'pending_payment' : 'active',
         phase: 'funded',
         balance: account.challengeSize,
         initialBalance: account.challengeSize,
@@ -2132,7 +2174,9 @@ async function startServer() {
       dataStore.accountLogs.push({
         id: `log-${Date.now()}-admin-funded`,
         accountId: fundedAccountId,
-        message: `Funded live trading account created automatically (Pending activation).`,
+        message: isPayLater 
+          ? `Funded live trading account created automatically (Pending success fee payment).`
+          : `Funded live trading account created automatically (Activated immediately).`,
         type: 'info',
         timestamp: new Date().toISOString()
       });

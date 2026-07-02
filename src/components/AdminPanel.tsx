@@ -493,9 +493,32 @@ export default function AdminPanel({
                             </p>
                           </td>
                           <td className="py-3">
-                            <span className="px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 font-mono text-[10px] uppercase font-bold">
-                              {account.phase}
-                            </span>
+                            <div className="space-y-1">
+                              <div>
+                                {account.type === 'pass_pay_later' ? (
+                                  <span className="px-2 py-0.5 rounded font-mono text-[10px] uppercase font-bold border bg-purple-500/15 text-purple-400 border-purple-500/30">
+                                    PAYOUT LATER
+                                  </span>
+                                ) : (
+                                  <span className={`px-2 py-0.5 rounded font-mono text-[10px] uppercase font-bold border ${
+                                    account.phase === 'phase1' ? 'bg-amber-500/15 text-amber-400 border-amber-500/30' :
+                                    account.phase === 'phase2' ? 'bg-blue-500/15 text-blue-400 border-blue-500/30' :
+                                    'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                                  }`}>
+                                    {account.phase === 'phase1' ? 'PHASE 1' : account.phase === 'phase2' ? 'PHASE 2' : 'FUNDED'}
+                                  </span>
+                                )}
+                              </div>
+                              <div>
+                                <span className={`px-1.5 py-0.5 rounded font-mono text-[9px] uppercase font-semibold border ${
+                                  account.type === 'pass_pay_later' ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' :
+                                  account.type === 'instant' ? 'bg-pink-500/10 text-pink-400 border-pink-500/20' :
+                                  'bg-gray-800 text-gray-400 border-gray-700'
+                                }`}>
+                                  {account.type === 'pass_pay_later' ? 'PAYOUT LATER PLAN' : account.type.toUpperCase().replace('_', ' ')}
+                                </span>
+                              </div>
+                            </div>
                           </td>
                           <td className="py-3 text-gray-400 font-mono">
                             <p className="text-xxs">Daily: -${account.dailyDrawdownLimitValue.toLocaleString()}</p>
@@ -507,7 +530,9 @@ export default function AdminPanel({
                               account.status === 'pending_payment' ? 'bg-amber-500/10 text-amber-400' :
                               account.status === 'breached' ? 'bg-red-500/10 text-red-400' : 'bg-blue-500/10 text-blue-400'
                             }`}>
-                              {account.status.toUpperCase()}
+                              {account.status === 'pending_payment' 
+                                ? (account.type === 'pass_pay_later' && account.phase === 'funded' ? 'PENDING PAYMENT' : 'PENDING ACTIVATION') 
+                                : account.status.toUpperCase().replace('_', ' ')}
                             </span>
                           </td>
                           <td className="py-3 text-right pr-2">
@@ -1310,7 +1335,9 @@ export default function AdminPanel({
                       selectedAccountForDetails.status === 'breached' ? 'bg-red-500/10 text-red-400 border border-red-500/20' :
                       'bg-blue-500/10 text-blue-400 border border-blue-500/20'
                     }`}>
-                      {selectedAccountForDetails.status.replace('_', ' ').toUpperCase()}
+                      {selectedAccountForDetails.status === 'pending_payment' 
+                        ? (selectedAccountForDetails.type === 'pass_pay_later' && selectedAccountForDetails.phase === 'funded' ? 'PENDING PAYMENT' : 'PENDING ACTIVATION') 
+                        : selectedAccountForDetails.status.replace('_', ' ').toUpperCase()}
                     </span>
                   </div>
                   <h3 className="text-xl font-bold text-white flex items-center gap-2">

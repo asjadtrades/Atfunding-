@@ -1158,7 +1158,7 @@ export default function LandingPage({
                   <span>Instagram Official</span>
                 </a>
                 <a
-                  href="https://www.instagram.com/atfundingteam"
+                  href="https://www.instagram.com/atfunding.team"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center justify-center gap-1.5 p-2 rounded-lg bg-gradient-to-r from-pink-600 to-red-500 hover:opacity-90 text-white font-bold text-xs text-center transition-opacity"
@@ -1169,8 +1169,8 @@ export default function LandingPage({
 
               <div className="text-center font-mono text-[10px] text-gray-500 space-y-0.5 pt-2 border-t border-gray-800/60">
                 <p>Official Page: <a href="https://www.instagram.com/atfunding" target="_blank" rel="noopener noreferrer" className="text-amber-400 hover:underline">@atfunding</a></p>
-                <p>Support Account: <a href="https://www.instagram.com/atfundingteam" target="_blank" rel="noopener noreferrer" className="text-amber-400 hover:underline">@atfundingteam</a></p>
-                <p>Gmail: <a href="mailto:asjadtrades07@gmail.com" className="text-amber-400 hover:underline">asjadtrades07@gmail.com</a></p>
+                <p>Support Account: <a href="https://www.instagram.com/atfunding.team" target="_blank" rel="noopener noreferrer" className="text-amber-400 hover:underline">@atfunding.team</a></p>
+                <p>Gmail: <a href="mailto:ATgrowfund@gmail.com" className="text-amber-400 hover:underline">ATgrowfund@gmail.com</a></p>
               </div>
             </div>
 

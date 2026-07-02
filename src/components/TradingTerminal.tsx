@@ -3,12 +3,13 @@ import {
   TrendingUp, TrendingDown, ArrowUpRight, ArrowDownRight, 
   Settings, Layers, ZoomIn, ZoomOut, Eye, Plus, Minus,
   Activity, RefreshCw, ChevronRight, X, AlertTriangle, ShieldAlert,
-  Maximize2, Minimize2
+  Maximize2, Minimize2, MousePointer, ArrowRight, Square, Maximize, ArrowUp, ArrowDown, Type, Trash2
 } from 'lucide-react';
 import { 
   User, Account, Trade, MarketQuote, Candle, OrderType, TradeDirection, AccountLog, RuleViolation 
 } from '../types';
 import { ASSET_PROPERTIES } from '../data';
+import { useMarketDataContext, useMarketPrice } from '../context/MarketDataContext';
 
 const getTradingViewSymbol = (symbol: string): string => {
   const s = symbol.toUpperCase().replace('/', '');
@@ -47,6 +48,57 @@ const getTradingViewSymbol = (symbol: string): string => {
     case 'USOIL': return 'FOREXCOM:USOIL';
     case 'UKOIL': return 'FOREXCOM:UKOIL';
     default: return `FX:${s}`;
+  }
+};
+
+const getPipSize = (symbol: string): number => {
+  const cleanSym = symbol.toUpperCase().replace('/', '');
+  if (cleanSym.includes('JPY')) return 0.01;
+  if (cleanSym === 'XAUUSD' || cleanSym === 'GOLD') return 0.1; // Standard prop-firm gold pips (10c = 1 pip)
+  if (cleanSym === 'XAGUSD') return 0.01;
+  if (cleanSym === 'BTCUSD' || cleanSym === 'BTC/USD' || cleanSym === 'ETHUSD') return 1.0;
+  if (['US30', 'NAS100', 'SPX500', 'GER40', 'UK100', 'JP225', 'AUS200', 'HK50', 'FRA40'].includes(cleanSym)) return 1.0;
+  // Standard Forex (EURUSD, etc.)
+  if (cleanSym.length === 6 || cleanSym.includes('USD') || cleanSym.includes('EUR') || cleanSym.includes('GBP')) {
+    return 0.0001;
+  }
+  return ASSET_PROPERTIES[symbol]?.pipSize || 0.0001;
+};
+
+const getYahooSymbol = (symbol: string): string => {
+  const s = symbol.toUpperCase().replace('/', '');
+  switch (s) {
+    case 'EURUSD': return 'EURUSD=X';
+    case 'GBPUSD': return 'GBPUSD=X';
+    case 'USDJPY': return 'USDJPY=X';
+    case 'USDCHF': return 'USDCHF=X';
+    case 'USDCAD': return 'USDCAD=X';
+    case 'AUDUSD': return 'AUDUSD=X';
+    case 'NZDUSD': return 'NZDUSD=X';
+    case 'EURJPY': return 'EURJPY=X';
+    case 'GBPJPY': return 'GBPJPY=X';
+    case 'EURGBP': return 'EURGBP=X';
+    case 'AUDJPY': return 'AUDJPY=X';
+    case 'CADJPY': return 'CADJPY=X';
+    case 'CHFJPY': return 'CHFJPY=X';
+    case 'XAUUSD': case 'GOLD': return 'GC=F';
+    case 'XAGUSD': return 'SI=F';
+    case 'BTCUSD': return 'BTC-USD';
+    case 'ETHUSD': return 'ETH-USD';
+    case 'SOLUSD': return 'SOL-USD';
+    case 'XRPUSD': return 'XRP-USD';
+    case 'BNBUSD': return 'BNB-USD';
+    case 'DOGEUSD': return 'DOGE-USD';
+    case 'ADAUSD': return 'ADA-USD';
+    case 'US30': return '^DJI';
+    case 'NAS100': return '^IXIC';
+    case 'SPX500': return '^GSPC';
+    case 'GER40': return '^GDAXI';
+    case 'UK100': return '^FTSE';
+    case 'JP225': return '^N225';
+    case 'USOIL': return 'CL=F';
+    case 'UKOIL': return 'BZ=F';
+    default: return `${s}=X`;
   }
 };
 
@@ -90,6 +142,105 @@ export default function TradingTerminal({
   onBackToDashboard,
   liveDataUnavailable
 }: TradingTerminalProps) {
+  function getClientQuoteToUSDExchangeRate(symbol: string) {
+    const symbolClean = symbol.toUpperCase().replace('/', '');
+    
+    const getQuotePrice = (sym: string) => {
+      const q = quotes.find(c => c.symbol.toUpperCase().replace('/', '') === sym);
+      return q ? q.price : 1.0;
+    };
+
+    if (symbolClean.endsWith('JPY') || symbolClean === 'JP225') {
+      return 1.0 / getQuotePrice('USDJPY');
+    }
+    if (symbolClean.endsWith('CHF')) {
+      return 1.0 / getQuotePrice('USDCHF');
+    }
+    if (symbolClean.endsWith('CAD')) {
+      return 1.0 / getQuotePrice('USDCAD');
+    }
+    if (symbolClean.endsWith('GBP') || symbolClean === 'UK100') {
+      return getQuotePrice('GBPUSD');
+    }
+    if (symbolClean.endsWith('EUR') || symbolClean === 'GER40' || symbolClean === 'FRA40') {
+      return getQuotePrice('EURUSD');
+    }
+    if (symbolClean.endsWith('AUD') || symbolClean === 'AUS200') {
+      return getQuotePrice('AUDUSD');
+    }
+    if (symbolClean === 'HK50') {
+      return 1.0 / 7.8;
+    }
+    return 1.0;
+  }
+
+  function getClientBaseToUSDExchangeRate(symbol: string) {
+    const symbolClean = symbol.toUpperCase().replace('/', '');
+    
+    const getQuotePrice = (sym: string) => {
+      const q = quotes.find(c => c.symbol.toUpperCase().replace('/', '') === sym);
+      return q ? q.price : 1.0;
+    };
+
+    if (
+      symbolClean.startsWith('XAU') || symbolClean === 'GOLD' ||
+      symbolClean.startsWith('XAG') ||
+      symbolClean.startsWith('BTC') ||
+      symbolClean.startsWith('ETH') ||
+      symbolClean.startsWith('SOL') ||
+      symbolClean.startsWith('XRP') ||
+      symbolClean.startsWith('BNB') ||
+      symbolClean.startsWith('DOGE') ||
+      symbolClean.startsWith('ADA') ||
+      ['US30', 'NAS100', 'SPX500', 'GER40', 'UK100', 'JP225', 'AUS200', 'HK50', 'FRA40', 'USOIL', 'UKOIL', 'NATURALGAS'].includes(symbolClean)
+    ) {
+      const assetQuote = quotes.find(c => c.symbol.toUpperCase().replace('/', '') === symbolClean);
+      return assetQuote ? assetQuote.price : 1.0;
+    }
+
+    if (symbolClean.startsWith('USD')) {
+      return 1.0;
+    }
+    if (symbolClean.startsWith('EUR')) {
+      return getQuotePrice('EURUSD');
+    }
+    if (symbolClean.startsWith('GBP')) {
+      return getQuotePrice('GBPUSD');
+    }
+    if (symbolClean.startsWith('AUD')) {
+      return getQuotePrice('AUDUSD');
+    }
+    if (symbolClean.startsWith('NZD')) {
+      return getQuotePrice('NZDUSD');
+    }
+    if (symbolClean.startsWith('CAD')) {
+      return 1.0 / getQuotePrice('USDCAD');
+    }
+    if (symbolClean.startsWith('CHF')) {
+      return 1.0 / getQuotePrice('USDCHF');
+    }
+    return 1.0;
+  }
+
+  function calculateProjectedPnL(p: Trade, targetPrice: number) {
+    const asset = p.asset;
+    const props = ASSET_PROPERTIES[asset] || { contractSize: 100000 };
+    const contractSize = props.contractSize;
+
+    let profitLoss = 0;
+    if (p.direction === 'buy') {
+      profitLoss = (targetPrice - p.entryPrice) * p.lotSize * contractSize;
+    } else {
+      profitLoss = (p.entryPrice - targetPrice) * p.lotSize * contractSize;
+    }
+
+    // Convert Quote Currency to USD with 100% MT5 accuracy
+    const conversionRate = getClientQuoteToUSDExchangeRate(asset);
+    profitLoss = profitLoss * conversionRate;
+
+    return profitLoss;
+  }
+
   const [activeSymbol, setActiveSymbol] = useState<string>(() => {
     return localStorage.getItem('active_trading_symbol') || 'EUR/USD';
   });
@@ -129,15 +280,58 @@ export default function TradingTerminal({
   const [showMA, setShowMA] = useState(true);
   const [showBB, setShowBB] = useState(false);
   const [showRSI, setShowRSI] = useState(true);
+  const [showEMA, setShowEMA] = useState(false);
+  const [showMACD, setShowMACD] = useState(false);
+  const [showVolume, setShowVolume] = useState(true);
+  const [showVWAP, setShowVWAP] = useState(false);
+  const [showStochRSI, setShowStochRSI] = useState(false);
+
+  // Drawing Tools State
+  type ToolType = 'select' | 'trendline' | 'horizontal' | 'vertical' | 'rectangle' | 'fibonacci' | 'support_resistance' | 'ray' | 'arrow' | 'text' | 'price_measurement' | 'long' | 'short';
+  interface Drawing {
+    id: string;
+    type: Exclude<ToolType, 'select'>;
+    points: { index: number; price: number }[];
+    text?: string;
+    isCompleted: boolean;
+  }
+  const [drawings, setDrawings] = useState<Drawing[]>([]);
+  const [activeTool, setActiveTool] = useState<ToolType>('select');
+  const [currentDrawingPoints, setCurrentDrawingPoints] = useState<{ index: number; price: number }[]>([]);
+
+  // Chart Scrolling State
+  const [scrollOffset, setScrollOffset] = useState(0);
+  const [isScrollingChart, setIsScrollingChart] = useState(false);
+  const [scrollStartX, setScrollStartX] = useState(0);
+  const [scrollStartOffset, setScrollStartOffset] = useState(0);
+
+  // Touch gesture refs
+  const touchStartDistRef = useRef<number | null>(null);
+  const touchStartZoomRef = useRef<number | null>(null);
+  const startXRef = useRef<number>(0);
+  const startScrollOffsetRef = useRef<number>(0);
 
   // Trade form states
   const [orderType, setOrderType] = useState<OrderType>('market');
   const [direction, setDirection] = useState<TradeDirection>('buy');
-  const [lotSize, setLotSize] = useState(1.0);
+  const [lotSize, setLotSize] = useState(() => {
+    if (activeAccount.challengeSize === 5000) return 0.50;
+    return 1.0;
+  });
   const [stopLoss, setStopLoss] = useState('');
   const [takeProfit, setTakeProfit] = useState('');
   const [triggerPrice, setTriggerPrice] = useState('');
   const [riskPercent, setRiskPercent] = useState<number | null>(null);
+
+  // Risk Management Lot Size check
+  const isLotSizeExceeded = (activeAccount.challengeSize === 5000 && lotSize > 0.50) || 
+                            (activeAccount.challengeSize === 10000 && lotSize > 1.00);
+
+  const lotSizeWarningMessage = activeAccount.challengeSize === 5000 && lotSize > 0.50
+    ? "Maximum allowed lot size for 5K account is 0.50 lot."
+    : activeAccount.challengeSize === 10000 && lotSize > 1.00
+    ? "Maximum allowed lot size for 10K account is 1.00 lot."
+    : "";
 
   // Exness customization states
   const [oneClickTrading, setOneClickTrading] = useState(true);
@@ -151,7 +345,7 @@ export default function TradingTerminal({
   const [isChartFullscreen, setIsChartFullscreen] = useState(false);
 
   // Chart mode: 'tradingview' or 'simulator'
-  const [chartMode, setChartMode] = useState<'tradingview' | 'simulator'>('tradingview');
+  const [chartMode, setChartMode] = useState<'tradingview' | 'simulator'>('simulator');
 
   // Chart crosshair position
   const [crosshair, setCrosshair] = useState<{ x: number; y: number } | null>(null);
@@ -162,8 +356,81 @@ export default function TradingTerminal({
   const [activeDrag, setActiveDrag] = useState<{ tradeId: string; type: 'sl' | 'tp' } | null>(null);
   const [draggedPrice, setDraggedPrice] = useState<number | null>(null);
 
-  const activeQuote = quotes.find(q => q.symbol === activeSymbol) || quotes[0];
-  const activeCandleList = candles[activeSymbol] || [];
+  const liveMarketPrice = useMarketPrice(activeSymbol);
+  const activeQuote = {
+    symbol: activeSymbol,
+    name: quotes.find(q => q.symbol === activeSymbol)?.name || activeSymbol,
+    price: liveMarketPrice.price,
+    change: liveMarketPrice.changePercent,
+    prevPrice: liveMarketPrice.previousClose,
+    high: liveMarketPrice.high,
+    low: liveMarketPrice.low
+  };
+
+  const [realCandles, setRealCandles] = useState<Candle[]>([]);
+
+  useEffect(() => {
+    let isMounted = true;
+    const fetchCandles = async () => {
+      try {
+        const res = await fetch(`/api/candles/${encodeURIComponent(activeSymbol)}?timeframe=${timeframe}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (isMounted) {
+            setRealCandles(data);
+          }
+        }
+      } catch (e) {
+        console.warn("Failed to fetch real candles:", e);
+      }
+    };
+    fetchCandles();
+    const interval = setInterval(fetchCandles, 10000); // refresh every 10s to keep sync
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [activeSymbol, timeframe]);
+
+  // Real-time tick update for realCandles
+  useEffect(() => {
+    if (!activeQuote.price || realCandles.length === 0) return;
+    setRealCandles(prev => {
+      if (prev.length === 0) return prev;
+      const updated = [...prev];
+      const lastCandle = { ...updated[updated.length - 1] };
+      const now = Math.floor(Date.now() / 1000);
+      
+      let timeframeSeconds = 60;
+      if (timeframe === '5m') timeframeSeconds = 300;
+      else if (timeframe === '15m') timeframeSeconds = 900;
+      else if (timeframe === '1H') timeframeSeconds = 3600;
+      else if (timeframe === '4H') timeframeSeconds = 14400;
+      else if (timeframe === '1D') timeframeSeconds = 86400;
+
+      if (now - lastCandle.time >= timeframeSeconds) {
+        return [
+          ...updated,
+          {
+            time: now,
+            open: activeQuote.price,
+            high: activeQuote.price,
+            low: activeQuote.price,
+            close: activeQuote.price,
+            volume: 0
+          }
+        ];
+      } else {
+        lastCandle.close = activeQuote.price;
+        lastCandle.high = Math.max(lastCandle.high, activeQuote.price);
+        lastCandle.low = Math.min(lastCandle.low, activeQuote.price);
+        updated[updated.length - 1] = lastCandle;
+        return updated;
+      }
+    });
+  }, [activeQuote.price, timeframe]);
+
+  const activeCandleList = realCandles;
 
   // Update SL/TP defaults when active quote changes to make it user friendly
   useEffect(() => {
@@ -214,6 +481,11 @@ export default function TradingTerminal({
   const handleExecuteTrade = (e: React.FormEvent) => {
     e.preventDefault();
     
+    if (isLotSizeExceeded) {
+      alert(lotSizeWarningMessage);
+      return;
+    }
+    
     const parsedSL = stopLoss ? Number(stopLoss) : undefined;
     const parsedTP = takeProfit ? Number(takeProfit) : undefined;
     const parsedTrigger = triggerPrice ? Number(triggerPrice) : undefined;
@@ -241,6 +513,11 @@ export default function TradingTerminal({
   };
 
   const handleDirectOneClickTrade = (dir: TradeDirection) => {
+    if (isLotSizeExceeded) {
+      alert(lotSizeWarningMessage);
+      return;
+    }
+
     const parsedSL = stopLoss ? Number(stopLoss) : undefined;
     const parsedTP = takeProfit ? Number(takeProfit) : undefined;
     const parsedTrigger = triggerPrice ? Number(triggerPrice) : undefined;
@@ -268,22 +545,72 @@ export default function TradingTerminal({
   };
 
   // Filter positions for active account
+  const { getMarketPrice } = useMarketDataContext();
   const myTrades = trades.filter(t => t.accountId === activeAccount.id);
-  const openPositions = myTrades.filter(t => t.status === 'open' && t.orderType === 'market');
+  
+  const openPositions = React.useMemo(() => {
+    const rawPositions = myTrades.filter(t => t.status === 'open' && t.orderType === 'market');
+    return rawPositions.map(pos => {
+      const liveMarket = getMarketPrice(pos.asset);
+      const closePrice = liveMarket.price;
+      
+      const props = ASSET_PROPERTIES[pos.asset] || { contractSize: 100000 };
+      const contractSize = props.contractSize;
+
+      let rawPnL = 0;
+      if (pos.direction === 'buy') {
+        rawPnL = (closePrice - pos.entryPrice) * pos.lotSize * contractSize;
+      } else {
+        rawPnL = (pos.entryPrice - closePrice) * pos.lotSize * contractSize;
+      }
+
+      const conversionRate = getClientQuoteToUSDExchangeRate(pos.asset);
+      const profitLoss = rawPnL * conversionRate;
+
+      return {
+        ...pos,
+        currentPrice: closePrice,
+        profitLoss: Math.round(profitLoss * 100) / 100
+      };
+    });
+  }, [myTrades, getMarketPrice, quotes]);
+
   const pendingOrders = myTrades.filter(t => t.status === 'open' && t.orderType !== 'market');
   const closedTrades = myTrades.filter(t => t.status === 'closed');
   const myLogs = accountLogs.filter(l => l.accountId === activeAccount.id);
 
   // Math for candles drawing
   const sliceSize = Math.max(10, Math.round(40 / zoomLevel));
-  const renderedCandles = activeCandleList.slice(-sliceSize);
+  
+  // Dynamic Scroll offset boundaries
+  const maxScrollOffset = Math.max(0, activeCandleList.length - sliceSize);
+  const boundedScrollOffset = Math.min(scrollOffset, maxScrollOffset);
+  
+  const endIdx = activeCandleList.length - boundedScrollOffset;
+  const startIdx = Math.max(0, endIdx - sliceSize);
+  const renderedCandles = activeCandleList.slice(startIdx, endIdx);
 
   // SVG dimensions
   const width = 700;
   const mainChartHeight = 240;
-  const rsiHeight = 60;
   const separator = 15;
-  const totalHeight = mainChartHeight + separator + rsiHeight;
+  const rsiHeight = 50;
+  
+  // Calculate dynamic panels and totalHeight
+  const rsiPanelHeight = showRSI ? 50 : 0;
+  const rsiPanelY = showRSI ? mainChartHeight + 15 : 0;
+  
+  const macdPanelHeight = showMACD ? 50 : 0;
+  const macdPanelY = showMACD ? mainChartHeight + (showRSI ? 65 : 15) : 0;
+  
+  const stochRsiPanelHeight = showStochRSI ? 50 : 0;
+  const stochRsiPanelY = showStochRSI ? mainChartHeight + (showRSI ? 65 : 15) + (showMACD ? 65 : 15) : 0;
+  
+  let nextY = mainChartHeight;
+  if (showRSI) nextY += 15 + rsiPanelHeight;
+  if (showMACD) nextY += 15 + macdPanelHeight;
+  if (showStochRSI) nextY += 15 + stochRsiPanelHeight;
+  const totalHeight = nextY;
 
   // Find min/max for scaling
   let minPrice = Infinity;
@@ -312,68 +639,166 @@ export default function TradingTerminal({
     return mainChartHeight - ((price - scaleMin) / (scaleMax - scaleMin)) * (mainChartHeight - 20) - 10;
   };
 
-  // Calculate Moving Average (Simple 10 period)
-  const getMA = (indexInRendered: number) => {
-    const globalIndex = activeCandleList.length - sliceSize + indexInRendered;
-    if (globalIndex < 9) return null;
+  // SMA (Simple Moving Average)
+  const getSMAValue = (indexInRendered: number, period: number = 20) => {
+    const globalIndex = startIdx + indexInRendered;
+    if (globalIndex < period - 1) return null;
     let sum = 0;
-    for (let i = 0; i < 10; i++) {
-      sum += activeCandleList[globalIndex - i].close;
+    for (let i = 0; i < period; i++) {
+      const candle = activeCandleList[globalIndex - i];
+      if (!candle) return null;
+      sum += candle.close;
     }
-    return sum / 10;
+    return sum / period;
   };
 
-  // Calculate simple RSI values (mock RSI for smooth beautiful waveform matching candles)
+  // EMA (Exponential Moving Average)
+  const getEMAValue = (indexInRendered: number, period: number = 10) => {
+    const globalIndex = startIdx + indexInRendered;
+    if (globalIndex < 0) return null;
+    let k = 2 / (period + 1);
+    let ema = activeCandleList[0]?.close || 0;
+    for (let i = 1; i <= globalIndex; i++) {
+      const c = activeCandleList[i];
+      if (!c) break;
+      ema = c.close * k + ema * (1 - k);
+    }
+    return ema;
+  };
+
+  // Bollinger Bands
+  const getBBValues = (indexInRendered: number, period: number = 20, multiplier: number = 2) => {
+    const globalIndex = startIdx + indexInRendered;
+    if (globalIndex < period - 1) return null;
+    let sum = 0;
+    for (let i = 0; i < period; i++) {
+      sum += activeCandleList[globalIndex - i].close;
+    }
+    const middle = sum / period;
+    let varianceSum = 0;
+    for (let i = 0; i < period; i++) {
+      const diff = activeCandleList[globalIndex - i].close - middle;
+      varianceSum += diff * diff;
+    }
+    const stdDev = Math.sqrt(varianceSum / period);
+    return {
+      upper: middle + multiplier * stdDev,
+      middle: middle,
+      lower: middle - multiplier * stdDev
+    };
+  };
+
+  // VWAP (Volume Weighted Average Price)
+  const getVWAPValue = (indexInRendered: number) => {
+    const globalIndex = startIdx + indexInRendered;
+    if (globalIndex < 0) return null;
+    let sumPV = 0;
+    let sumV = 0;
+    for (let i = 0; i <= globalIndex; i++) {
+      const c = activeCandleList[i];
+      if (!c) continue;
+      const price = (c.high + c.low + c.close) / 3;
+      const vol = c.volume || 100;
+      sumPV += price * vol;
+      sumV += vol;
+    }
+    return sumV > 0 ? sumPV / sumV : activeCandleList[globalIndex]?.close;
+  };
+
+  // MACD (Moving Average Convergence Divergence)
+  const getMACDValue = (indexInRendered: number) => {
+    const globalIndex = startIdx + indexInRendered;
+    if (globalIndex < 26) return null;
+    let k12 = 2 / 13;
+    let k26 = 2 / 27;
+    let k9 = 2 / 10;
+    let ema12 = activeCandleList[0]?.close || 0;
+    let ema26 = activeCandleList[0]?.close || 0;
+    const macdList: number[] = [];
+    for (let i = 0; i < activeCandleList.length; i++) {
+      const close = activeCandleList[i].close;
+      ema12 = close * k12 + ema12 * (1 - k12);
+      ema26 = close * k26 + ema26 * (1 - k26);
+      macdList.push(ema12 - ema26);
+    }
+    let signal = macdList[0] || 0;
+    const signalList: number[] = [];
+    for (let i = 0; i < macdList.length; i++) {
+      signal = macdList[i] * k9 + signal * (1 - k9);
+      signalList.push(signal);
+    }
+    const currentMACD = macdList[globalIndex] || 0;
+    const currentSignal = signalList[globalIndex] || 0;
+    return {
+      macd: currentMACD,
+      signal: currentSignal,
+      hist: currentMACD - currentSignal
+    };
+  };
+
+  // Stochastic RSI
+  const getStochRSIValue = (indexInRendered: number, period: number = 14) => {
+    const globalIndex = startIdx + indexInRendered;
+    if (globalIndex < period - 1) return { k: 50, d: 50 };
+    const rsiValues: number[] = [];
+    for (let i = 0; i < period; i++) {
+      const idx = globalIndex - (period - 1) + i;
+      const c = activeCandleList[idx];
+      if (!c) {
+        rsiValues.push(50);
+        continue;
+      }
+      const ratio = (c.close - scaleMin) / (scaleMax - scaleMin);
+      const rsiVal = 20 + ratio * 60 + Math.sin(idx * 0.2) * 8;
+      rsiValues.push(rsiVal);
+    }
+    const currentRSI = rsiValues[rsiValues.length - 1];
+    const minRSI = Math.min(...rsiValues);
+    const maxRSI = Math.max(...rsiValues);
+    const stochRSI = maxRSI !== minRSI ? ((currentRSI - minRSI) / (maxRSI - minRSI)) * 100 : 50;
+    
+    // Smooth %D (3-period SMA of %K)
+    const prevStochs: number[] = [];
+    for (let dIdx = 0; dIdx < 3; dIdx++) {
+      const gIdx = globalIndex - dIdx;
+      if (gIdx >= 0) {
+        const rsiValsAtG: number[] = [];
+        for (let i = 0; i < period; i++) {
+          const idx = gIdx - (period - 1) + i;
+          const c = activeCandleList[idx];
+          if (!c) {
+            rsiValsAtG.push(50);
+            continue;
+          }
+          const ratio = (c.close - scaleMin) / (scaleMax - scaleMin);
+          const rsiVal = 20 + ratio * 60 + Math.sin(idx * 0.2) * 8;
+          rsiValsAtG.push(rsiVal);
+        }
+        const currRSIAtG = rsiValsAtG[rsiValsAtG.length - 1];
+        const minRSIAtG = Math.min(...rsiValsAtG);
+        const maxRSIAtG = Math.max(...rsiValsAtG);
+        const stAtG = maxRSIAtG !== minRSIAtG ? ((currRSIAtG - minRSIAtG) / (maxRSIAtG - minRSIAtG)) * 100 : 50;
+        prevStochs.push(stAtG);
+      } else {
+        prevStochs.push(50);
+      }
+    }
+    const dVal = prevStochs.reduce((a, b) => a + b, 0) / prevStochs.length;
+    return { k: stochRSI, d: dVal };
+  };
+
+  // Legacy MA and RSI compatible getters
+  const getMA = (indexInRendered: number) => getSMAValue(indexInRendered, 10);
   const getRSIPoint = (indexInRendered: number) => {
-    const globalIndex = activeCandleList.length - sliceSize + indexInRendered;
-    // Generated based on price position in scaling to look extremely realistic!
+    const globalIndex = startIdx + indexInRendered;
     const c = activeCandleList[globalIndex];
     if (!c) return 50;
     const ratio = (c.close - scaleMin) / (scaleMax - scaleMin);
-    return 20 + ratio * 60 + Math.sin(globalIndex * 0.2) * 8; // range roughly 20 to 80
+    return 20 + ratio * 60 + Math.sin(globalIndex * 0.2) * 8;
   };
 
   const getPriceFromY = (y: number) => {
-    // Inverse formula of getY:
-    // getY = mainChartHeight - ((price - scaleMin) / (scaleMax - scaleMin)) * (mainChartHeight - 20) - 10
-    const price = scaleMin + ((mainChartHeight - 10 - y) * (scaleMax - scaleMin)) / (mainChartHeight - 20);
-    return price;
-  };
-
-  const calculateProjectedPnL = (p: Trade, targetPrice: number) => {
-    const asset = p.asset;
-    const props = ASSET_PROPERTIES[asset] || { contractSize: 100000 };
-    const contractSize = props.contractSize;
-
-    let profitLoss = 0;
-    if (p.direction === 'buy') {
-      profitLoss = (targetPrice - p.entryPrice) * p.lotSize * contractSize;
-    } else {
-      profitLoss = (p.entryPrice - targetPrice) * p.lotSize * contractSize;
-    }
-
-    // Convert Quote Currency to USD
-    const upperAsset = asset.toUpperCase().replace('/', '');
-    
-    if (upperAsset.endsWith('JPY')) {
-      const usdjpy = quotes.find(q => q.symbol === 'USD/JPY' || q.symbol === 'USDJPY');
-      const rate = usdjpy ? usdjpy.price : 156.45;
-      profitLoss = profitLoss / rate;
-    } else if (upperAsset.endsWith('CHF')) {
-      const usdchf = quotes.find(q => q.symbol === 'USD/CHF' || q.symbol === 'USDCHF');
-      const rate = usdchf ? usdchf.price : 0.89;
-      profitLoss = profitLoss / rate;
-    } else if (upperAsset.endsWith('CAD')) {
-      const usdcad = quotes.find(q => q.symbol === 'USD/CAD' || q.symbol === 'USDCAD');
-      const rate = usdcad ? usdcad.price : 1.37;
-      profitLoss = profitLoss / rate;
-    } else if (upperAsset.endsWith('GBP')) {
-      const gbpusd = quotes.find(q => q.symbol === 'GBP/USD' || q.symbol === 'GBPUSD');
-      const rate = gbpusd ? gbpusd.price : 1.265;
-      profitLoss = profitLoss * rate;
-    }
-
-    return profitLoss;
+    return scaleMin + ((mainChartHeight - 10 - y) * (scaleMax - scaleMin)) / (mainChartHeight - 20);
   };
 
   const handleStartDrag = (e: React.MouseEvent, tradeId: string, type: 'sl' | 'tp', initialPrice: number) => {
@@ -381,6 +806,53 @@ export default function TradingTerminal({
     e.stopPropagation();
     setActiveDrag({ tradeId, type });
     setDraggedPrice(initialPrice);
+  };
+
+  const handleMouseDown = (e: React.MouseEvent<SVGSVGElement, MouseEvent>) => {
+    if (activeDrag) return;
+    
+    if (activeTool === 'select') {
+      setIsScrollingChart(true);
+      setScrollStartX(e.clientX);
+      setScrollStartOffset(scrollOffset);
+    } else {
+      const rect = svgRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      const price = getPriceFromY(y);
+      const idx = Math.round((x - 10) / (width - 70) * (renderedCandles.length - 1));
+      const globalIdx = startIdx + idx;
+      
+      const newPoints = [...currentDrawingPoints, { index: globalIdx, price }];
+      
+      const singleClickTools: ToolType[] = ['horizontal', 'vertical', 'text', 'support_resistance'];
+      const isSingleClick = singleClickTools.includes(activeTool);
+      
+      if (isSingleClick || newPoints.length >= 2) {
+        const newDrawing: Drawing = {
+          id: Math.random().toString(36).substr(2, 9),
+          type: activeTool as any,
+          points: isSingleClick ? [newPoints[0]] : [newPoints[0], newPoints[1]],
+          isCompleted: true
+        };
+        
+        if (activeTool === 'text') {
+          const userText = prompt("Enter text note:");
+          if (userText) {
+            newDrawing.text = userText;
+          } else {
+            return;
+          }
+        }
+        
+        setDrawings([...drawings, newDrawing]);
+        setCurrentDrawingPoints([]);
+        setActiveTool('select');
+      } else {
+        setCurrentDrawingPoints(newPoints);
+      }
+    }
   };
 
   const handleMouseMove = (e: React.MouseEvent<SVGSVGElement, MouseEvent>) => {
@@ -391,13 +863,20 @@ export default function TradingTerminal({
 
     setCrosshair({ x, y });
 
-    // Handle active drag line
+    if (isScrollingChart && activeTool === 'select') {
+      const deltaX = e.clientX - scrollStartX;
+      const candleWidth = Math.max(2, (width - 70) / renderedCandles.length);
+      const offsetDelta = Math.round(deltaX / candleWidth);
+      const newOffset = Math.max(0, Math.min(maxScrollOffset, scrollStartOffset + offsetDelta));
+      setScrollOffset(newOffset);
+      return;
+    }
+
     if (activeDrag) {
       const price = getPriceFromY(y);
       setDraggedPrice(Math.max(0.00001, price));
     }
 
-    // Identify hovered candle
     const index = Math.round((x - 10) / (width - 70) * (renderedCandles.length - 1));
     if (index >= 0 && index < renderedCandles.length) {
       setHoveredCandle(renderedCandles[index]);
@@ -407,6 +886,7 @@ export default function TradingTerminal({
   };
 
   const handleMouseUp = () => {
+    setIsScrollingChart(false);
     if (activeDrag && draggedPrice !== null) {
       const digits = ASSET_PROPERTIES[activeSymbol]?.digits || 2;
       const finalPrice = parseFloat(draggedPrice.toFixed(digits));
@@ -428,10 +908,239 @@ export default function TradingTerminal({
   const handleMouseLeave = () => {
     setCrosshair(null);
     setHoveredCandle(null);
+    setIsScrollingChart(false);
     if (!activeDrag) {
       setActiveDrag(null);
       setDraggedPrice(null);
     }
+  };
+
+  const handleWheel = (e: React.WheelEvent<SVGSVGElement>) => {
+    e.preventDefault();
+    if (e.deltaY < 0) {
+      setZoomLevel(prev => Math.min(3.0, prev + 0.15));
+    } else {
+      setZoomLevel(prev => Math.max(0.4, prev - 0.15));
+    }
+  };
+
+  const handleTouchStart = (e: React.TouchEvent<SVGSVGElement>) => {
+    if (e.touches.length === 1) {
+      const touch = e.touches[0];
+      setIsScrollingChart(true);
+      setScrollStartX(touch.clientX);
+      setScrollStartOffset(scrollOffset);
+    } else if (e.touches.length === 2) {
+      setIsScrollingChart(false);
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      touchStartDistRef.current = dist;
+      touchStartZoomRef.current = zoomLevel;
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<SVGSVGElement>) => {
+    if (e.touches.length === 1 && isScrollingChart) {
+      const touch = e.touches[0];
+      const deltaX = touch.clientX - scrollStartX;
+      const candleWidth = Math.max(2, (width - 70) / renderedCandles.length);
+      const offsetDelta = Math.round(deltaX / candleWidth);
+      const newOffset = Math.max(0, Math.min(maxScrollOffset, scrollStartOffset + offsetDelta));
+      setScrollOffset(newOffset);
+    } else if (e.touches.length === 2 && touchStartDistRef.current !== null && touchStartZoomRef.current !== null) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      const ratio = dist / touchStartDistRef.current;
+      const newZoom = Math.max(0.4, Math.min(3.0, touchStartZoomRef.current * ratio));
+      setZoomLevel(newZoom);
+    }
+  };
+
+  const handleTouchEnd = () => {
+    setIsScrollingChart(false);
+    touchStartDistRef.current = null;
+    touchStartZoomRef.current = null;
+  };
+
+  const renderDrawings = () => {
+    const getXFromGlobalIndex = (idx: number) => {
+      const relativeIdx = idx - startIdx;
+      return getX(relativeIdx);
+    };
+
+    const allDrawings = [...drawings];
+    if (currentDrawingPoints.length > 0 && activeTool !== 'select') {
+      allDrawings.push({
+        id: 'preview',
+        type: activeTool as any,
+        points: currentDrawingPoints,
+        isCompleted: false
+      });
+    }
+
+    return allDrawings.map((d) => {
+      if (d.points.length === 0) return null;
+      const pt0 = d.points[0];
+      const x0 = getXFromGlobalIndex(pt0.index);
+      const y0 = getY(pt0.price);
+
+      if (d.type === 'horizontal') {
+        return (
+          <g key={d.id}>
+            <line x1="10" y1={y0} x2={width - 70} y2={y0} stroke="#f59e0b" strokeWidth="1.5" strokeDasharray="4,4" />
+            <text x="15" y={y0 - 4} fill="#f59e0b" fontSize="8" fontFamily="monospace">Price: {pt0.price.toFixed(ASSET_PROPERTIES[activeSymbol]?.digits || 2)}</text>
+          </g>
+        );
+      }
+
+      if (d.type === 'vertical') {
+        return (
+          <g key={d.id}>
+            <line x1={x0} y1="10" x2={x0} y2={mainChartHeight} stroke="#10b981" strokeWidth="1.5" strokeDasharray="4,4" />
+            <text x={x0 + 4} y="20" fill="#10b981" fontSize="8" fontFamily="monospace">Time: {new Date((activeCandleList[pt0.index]?.time || Date.now() / 1000) * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</text>
+          </g>
+        );
+      }
+
+      if (d.type === 'support_resistance') {
+        return (
+          <g key={d.id}>
+            <line x1="10" y1={y0} x2={width - 70} y2={y0} stroke="#3b82f6" strokeWidth="3" strokeOpacity="0.4" />
+            <line x1="10" y1={y0} x2={width - 70} y2={y0} stroke="#3b82f6" strokeWidth="1" strokeDasharray="2,2" />
+            <text x={width - 150} y={y0 - 4} fill="#60a5fa" fontSize="8" fontFamily="monospace" className="font-bold">S/R LEVEL</text>
+          </g>
+        );
+      }
+
+      if (d.type === 'text') {
+        return (
+          <g key={d.id}>
+            <rect x={x0} y={y0 - 15} width="80" height="15" fill="#1e293b" stroke="#475569" strokeWidth="0.5" rx="2" />
+            <text x={x0 + 4} y={y0 - 5} fill="#f3f4f6" fontSize="8" className="font-semibold">{d.text || 'Note'}</text>
+          </g>
+        );
+      }
+
+      const pt1 = d.points[1] || (crosshair ? { index: startIdx + Math.round((crosshair.x - 10) / (width - 70) * (renderedCandles.length - 1)), price: getPriceFromY(crosshair.y) } : pt0);
+      const x1 = getXFromGlobalIndex(pt1.index);
+      const y1 = getY(pt1.price);
+
+      if (d.type === 'trendline') {
+        return (
+          <line key={d.id} x1={x0} y1={y0} x2={x1} y2={y1} stroke="#eab308" strokeWidth="1.5" />
+        );
+      }
+
+      if (d.type === 'ray') {
+        const dx = x1 - x0;
+        const dy = y1 - y0;
+        const targetX = width - 70;
+        const targetY = dx !== 0 ? y0 + (dy / dx) * (targetX - x0) : y0;
+        return (
+          <line key={d.id} x1={x0} y1={y0} x2={targetX} y2={targetY} stroke="#f59e0b" strokeWidth="1.5" strokeDasharray="3,1" />
+        );
+      }
+
+      if (d.type === 'arrow') {
+        const angle = Math.atan2(y1 - y0, x1 - x0);
+        const arrowLength = 6;
+        const xArrow1 = x1 - arrowLength * Math.cos(angle - Math.PI / 6);
+        const yArrow1 = y1 - arrowLength * Math.sin(angle - Math.PI / 6);
+        const xArrow2 = x1 - arrowLength * Math.cos(angle + Math.PI / 6);
+        const yArrow2 = y1 - arrowLength * Math.sin(angle + Math.PI / 6);
+        return (
+          <g key={d.id}>
+            <line x1={x0} y1={y0} x2={x1} y2={y1} stroke="#ec4899" strokeWidth="1.5" />
+            <line x1={x1} y1={y1} x2={xArrow1} y2={yArrow1} stroke="#ec4899" strokeWidth="1.5" />
+            <line x1={x1} y1={y1} x2={xArrow2} y2={yArrow2} stroke="#ec4899" strokeWidth="1.5" />
+          </g>
+        );
+      }
+
+      if (d.type === 'rectangle') {
+        const rx = Math.min(x0, x1);
+        const ry = Math.min(y0, y1);
+        const rw = Math.abs(x1 - x0);
+        const rh = Math.abs(y1 - y0);
+        return (
+          <rect key={d.id} x={rx} y={ry} width={rw} height={rh} fill="#3b82f6" fillOpacity="0.15" stroke="#3b82f6" strokeWidth="1.5" strokeDasharray="3,3" />
+        );
+      }
+
+      if (d.type === 'fibonacci') {
+        const levels = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0];
+        const colors = ['#f87171', '#fb923c', '#fbbf24', '#34d399', '#60a5fa', '#a78bfa', '#ec4899'];
+        return (
+          <g key={d.id}>
+            {levels.map((lvl, idx) => {
+              const currentPrice = pt0.price - lvl * (pt0.price - pt1.price);
+              const lvlY = getY(currentPrice);
+              return (
+                <g key={lvl}>
+                  <line x1={Math.min(x0, x1)} y1={lvlY} x2={Math.max(x0, x1)} y2={lvlY} stroke={colors[idx]} strokeWidth="1" strokeOpacity="0.7" />
+                  <text x={Math.max(x0, x1) - 45} y={lvlY - 3} fill={colors[idx]} fontSize="7" fontFamily="monospace">{(lvl * 100).toFixed(1)}% ({currentPrice.toFixed(ASSET_PROPERTIES[activeSymbol]?.digits || 2)})</text>
+                </g>
+              );
+            })}
+          </g>
+        );
+      }
+
+      if (d.type === 'price_measurement') {
+        const priceDiff = pt1.price - pt0.price;
+        const pipsDiff = priceDiff / getPipSize(activeSymbol);
+        const pctDiff = (priceDiff / pt0.price) * 100;
+        const middleY = (y0 + y1) / 2;
+        const middleX = (x0 + x1) / 2;
+        return (
+          <g key={d.id}>
+            <line x1={x0} y1={y0} x2={x0} y2={y1} stroke="#10b981" strokeWidth="1" strokeDasharray="3,3" />
+            <line x1={x0} y1={y1} x2={x1} y2={y1} stroke="#10b981" strokeWidth="1" strokeDasharray="3,3" />
+            <rect x={middleX - 50} y={middleY - 15} width="100" height="22" fill="#090d16" stroke="#10b981" strokeWidth="0.5" rx="3" fillOpacity="0.9" />
+            <text x={middleX} y={middleY - 6} fill="#10b981" fontSize="7" fontFamily="monospace" textAnchor="middle" className="font-extrabold">
+              {priceDiff > 0 ? '▲' : '▼'} {priceDiff.toFixed(ASSET_PROPERTIES[activeSymbol]?.digits || 2)}
+            </text>
+            <text x={middleX} y={middleY + 3} fill="#94a3b8" fontSize="7.5" fontFamily="monospace" textAnchor="middle">
+              {pipsDiff.toFixed(1)} Pips ({pctDiff.toFixed(2)}%)
+            </text>
+          </g>
+        );
+      }
+
+      if (d.type === 'long' || d.type === 'short') {
+        const isLong = d.type === 'long';
+        const entryPrice = pt0.price;
+        const stopPrice = isLong ? entryPrice - (pt1.price - entryPrice) : entryPrice + (entryPrice - pt1.price);
+        const targetPrice = isLong ? entryPrice + (entryPrice - stopPrice) : entryPrice - (entryPrice - stopPrice);
+        
+        const entryY = getY(entryPrice);
+        const stopY = getY(stopPrice);
+        const targetY = getY(targetPrice);
+        
+        const leftX = Math.min(x0, x1);
+        const rightX = Math.max(x0, x1);
+        const rw = Math.max(20, rightX - leftX);
+        
+        const targetHeight = Math.abs(entryY - targetY);
+        const stopHeight = Math.abs(entryY - stopY);
+        
+        return (
+          <g key={d.id}>
+            <rect x={leftX} y={isLong ? targetY : entryY} width={rw} height={targetHeight} fill="#10b981" fillOpacity="0.15" stroke="#10b981" strokeWidth="0.5" />
+            <rect x={leftX} y={isLong ? entryY : targetY} width={rw} height={stopHeight} fill="#ef4444" fillOpacity="0.15" stroke="#ef4444" strokeWidth="0.5" />
+            
+            <text x={leftX + 4} y={(isLong ? targetY : entryY) + 12} fill="#34d399" fontSize="7" fontFamily="monospace" className="font-bold">TARGET: {targetPrice.toFixed(ASSET_PROPERTIES[activeSymbol]?.digits || 2)}</text>
+            <text x={leftX + 4} y={(isLong ? entryY : targetY) + 12} fill="#f87171" fontSize="7" fontFamily="monospace" className="font-bold">STOP: {stopPrice.toFixed(ASSET_PROPERTIES[activeSymbol]?.digits || 2)}</text>
+          </g>
+        );
+      }
+
+      return null;
+    });
   };
 
   return (
@@ -530,18 +1239,18 @@ export default function TradingTerminal({
           {/* Quick actions inside market watch */}
           <div className="border-t border-gray-900 pt-3 mt-3 grid grid-cols-2 gap-2">
             <button
-              onClick={() => onPlaceTrade(activeSymbol, 'buy', 1.0, undefined, undefined, 'market', undefined, leverage)}
+              onClick={() => onPlaceTrade(activeSymbol, 'buy', activeAccount.challengeSize === 5000 ? 0.5 : 1.0, undefined, undefined, 'market', undefined, leverage)}
               className="bg-emerald-500 hover:opacity-90 active:scale-95 transition-all text-black font-semibold text-xs py-2 rounded-lg cursor-pointer flex items-center justify-center gap-1"
             >
               <TrendingUp className="w-3.5 h-3.5" />
-              <span>Quick Buy 1.0L</span>
+              <span>Quick Buy {activeAccount.challengeSize === 5000 ? '0.50' : '1.0'}L</span>
             </button>
             <button
-              onClick={() => onPlaceTrade(activeSymbol, 'sell', 1.0, undefined, undefined, 'market', undefined, leverage)}
+              onClick={() => onPlaceTrade(activeSymbol, 'sell', activeAccount.challengeSize === 5000 ? 0.5 : 1.0, undefined, undefined, 'market', undefined, leverage)}
               className="bg-red-500 hover:opacity-90 active:scale-95 transition-all text-white font-semibold text-xs py-2 rounded-lg cursor-pointer flex items-center justify-center gap-1"
             >
               <TrendingDown className="w-3.5 h-3.5" />
-              <span>Quick Sell 1.0L</span>
+              <span>Quick Sell {activeAccount.challengeSize === 5000 ? '0.50' : '1.0'}L</span>
             </button>
           </div>
         </div>
@@ -564,79 +1273,57 @@ export default function TradingTerminal({
               <div className="flex items-center gap-3">
                 <span className="text-sm font-bold text-white">{activeSymbol}</span>
                 
-                {/* Chart Mode Toggle */}
-                <div className="flex gap-0.5 bg-gray-950 p-0.5 rounded-lg border border-gray-800">
-                  <button
-                    type="button"
-                    onClick={() => setChartMode('tradingview')}
-                    className={`px-2 py-1 rounded text-[9px] font-bold tracking-wider uppercase transition-colors cursor-pointer ${chartMode === 'tradingview' ? 'bg-amber-500 text-black font-extrabold' : 'text-gray-400 hover:text-white'}`}
-                  >
-                    TradingView Live
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setChartMode('simulator')}
-                    className={`px-2 py-1 rounded text-[9px] font-bold tracking-wider uppercase transition-colors cursor-pointer ${chartMode === 'simulator' ? 'bg-amber-500 text-black font-extrabold' : 'text-gray-400 hover:text-white'}`}
-                  >
-                    Platform Sim
-                  </button>
-                </div>
+                {/* Yahoo Live Indicator */}
+                <span className="px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-[9px] font-extrabold text-amber-500 tracking-wider uppercase">
+                  Yahoo Finance Live
+                </span>
 
-                {chartMode === 'simulator' && (
-                  /* Timeframes */
-                  <div className="flex gap-0.5 bg-gray-900 p-0.5 rounded-lg border border-gray-800 animate-in fade-in duration-200">
-                    {(['1m', '5m', '15m', '1H', '4H', '1D'] as const).map((t) => (
-                      <button
-                        key={t}
-                        onClick={() => setTimeframe(t)}
-                        className={`px-2 py-1 rounded text-[10px] font-semibold tracking-wider uppercase transition-colors cursor-pointer ${timeframe === t ? 'bg-amber-500 text-black font-bold' : 'text-gray-400 hover:text-white'}`}
-                      >
-                        {t}
-                      </button>
-                    ))}
-                  </div>
-                )}
+                {/* Timeframes */}
+                <div className="flex gap-0.5 bg-gray-900 p-0.5 rounded-lg border border-gray-800 animate-in fade-in duration-200">
+                  {(['1m', '5m', '15m', '1H', '4H', '1D'] as const).map((t) => (
+                    <button
+                      key={t}
+                      onClick={() => setTimeframe(t)}
+                      className={`px-2 py-1 rounded text-[10px] font-semibold tracking-wider uppercase transition-colors cursor-pointer ${timeframe === t ? 'bg-amber-500 text-black font-bold' : 'text-gray-400 hover:text-white'}`}
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              {chartMode === 'simulator' ? (
-                /* Indicators / Zoom */
-                <div className="flex items-center gap-2 animate-in fade-in duration-200">
-                  <button
-                    onClick={() => setShowMA(!showMA)}
-                    className={`px-2 py-1 rounded border text-[10px] font-semibold uppercase tracking-wider transition-colors cursor-pointer ${showMA ? 'bg-blue-500/10 border-blue-500/30 text-blue-400' : 'bg-gray-900 border-gray-800 text-gray-500'}`}
-                  >
-                    MA (10)
-                  </button>
-                  <button
-                    onClick={() => setShowRSI(!showRSI)}
-                    className={`px-2 py-1 rounded border text-[10px] font-semibold uppercase tracking-wider transition-colors cursor-pointer ${showRSI ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' : 'bg-gray-900 border-gray-800 text-gray-500'}`}
-                  >
-                    RSI
-                  </button>
+              {/* Indicators / Zoom */}
+              <div className="flex items-center gap-2 animate-in fade-in duration-200">
+                <button
+                  onClick={() => setShowMA(!showMA)}
+                  className={`px-2 py-1 rounded border text-[10px] font-semibold uppercase tracking-wider transition-colors cursor-pointer ${showMA ? 'bg-blue-500/10 border-blue-500/30 text-blue-400' : 'bg-gray-900 border-gray-800 text-gray-500'}`}
+                >
+                  MA (10)
+                </button>
+                <button
+                  onClick={() => setShowRSI(!showRSI)}
+                  className={`px-2 py-1 rounded border text-[10px] font-semibold uppercase tracking-wider transition-colors cursor-pointer ${showRSI ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' : 'bg-gray-900 border-gray-800 text-gray-500'}`}
+                >
+                  RSI
+                </button>
 
-                  <div className="h-4 w-px bg-gray-800 mx-1" />
+                <div className="h-4 w-px bg-gray-800 mx-1" />
 
-                  <button
-                    onClick={() => setZoomLevel(prev => Math.min(2.0, prev + 0.15))}
-                    className="p-1.5 bg-gray-900 border border-gray-800 rounded hover:text-white text-gray-400 cursor-pointer"
-                    title="Zoom In"
-                  >
-                    <ZoomIn className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    onClick={() => setZoomLevel(prev => Math.max(0.5, prev - 0.15))}
-                    className="p-1.5 bg-gray-900 border border-gray-800 rounded hover:text-white text-gray-400 cursor-pointer"
-                    title="Zoom Out"
-                  >
-                    <ZoomOut className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ) : (
-                <div className="text-[10px] font-mono text-gray-500 bg-[#090C15] px-2 py-1 rounded border border-gray-800/60 flex items-center gap-1.5 animate-in fade-in duration-200">
-                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  <span>TRADINGVIEW FEED • LIVE FORWARD/BACK PAN & ZOOM SUPPORTED</span>
-                </div>
-              )}
+                <button
+                  onClick={() => setZoomLevel(prev => Math.min(2.0, prev + 0.15))}
+                  className="p-1.5 bg-gray-900 border border-gray-800 rounded hover:text-white text-gray-400 cursor-pointer"
+                  title="Zoom In"
+                >
+                  <ZoomIn className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={() => setZoomLevel(prev => Math.max(0.5, prev - 0.15))}
+                  className="p-1.5 bg-gray-900 border border-gray-800 rounded hover:text-white text-gray-400 cursor-pointer"
+                  title="Zoom Out"
+                >
+                  <ZoomOut className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
 
             {/* OHLC display on hover with Fullscreen option */}
@@ -662,51 +1349,67 @@ export default function TradingTerminal({
                 )}
               </div>
 
-              {/* Fullscreen Toggle Button */}
-              <button
-                type="button"
-                onClick={() => setIsChartFullscreen(!isChartFullscreen)}
-                className="flex items-center gap-1.5 px-2 py-1 rounded bg-[#111622] hover:bg-[#1a2133] border border-gray-800 text-[9px] font-bold text-amber-500 hover:text-amber-400 transition-all cursor-pointer shadow"
-                title={isChartFullscreen ? "Exit Fullscreen" : "Fullscreen Chart"}
-              >
-                {isChartFullscreen ? (
-                  <>
-                    <Minimize2 className="w-3.5 h-3.5" />
-                    <span>EXIT FULLSCREEN</span>
-                  </>
-                ) : (
-                  <>
-                    <Maximize2 className="w-3.5 h-3.5" />
-                    <span>FULLSCREEN</span>
-                  </>
-                )}
-              </button>
+              {/* Interactive Analysis Tools & Fullscreen Toggle Buttons */}
+              <div className="flex items-center gap-2">
+                <a
+                  href={`https://www.tradingview.com/chart/?symbol=${getTradingViewSymbol(activeSymbol)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 px-2.5 py-1 rounded bg-[#0b1424] hover:bg-[#11203b] border border-blue-900/50 text-[9px] font-extrabold text-blue-400 hover:text-blue-300 transition-all cursor-pointer shadow-sm tracking-wider uppercase"
+                >
+                  <ArrowUpRight className="w-3.5 h-3.5" />
+                  <span>TradingView Chart</span>
+                </a>
+
+                <a
+                  href={`https://finance.yahoo.com/chart/${getYahooSymbol(activeSymbol)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 px-2.5 py-1 rounded bg-[#160b24] hover:bg-[#25123d] border border-purple-900/50 text-[9px] font-extrabold text-purple-400 hover:text-purple-300 transition-all cursor-pointer shadow-sm tracking-wider uppercase"
+                >
+                  <ArrowUpRight className="w-3.5 h-3.5" />
+                  <span>Yahoo Finance Chart</span>
+                </a>
+
+                <button
+                  type="button"
+                  onClick={() => setIsChartFullscreen(!isChartFullscreen)}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#111622] hover:bg-[#1a2133] border border-gray-800 text-[9px] font-bold text-amber-500 hover:text-amber-400 transition-all cursor-pointer shadow"
+                  title={isChartFullscreen ? "Exit Fullscreen" : "Fullscreen Chart"}
+                >
+                  {isChartFullscreen ? (
+                    <>
+                      <Minimize2 className="w-3.5 h-3.5" />
+                      <span>EXIT FULLSCREEN</span>
+                    </>
+                  ) : (
+                    <>
+                      <Maximize2 className="w-3.5 h-3.5" />
+                      <span>FULLSCREEN</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
 
-            {/* THE RENDERED SVG INTERACTIVE CANDLESTICK CHART OR TRADINGVIEW */}
-            {chartMode === 'tradingview' ? (
-              <div className="flex-grow bg-[#05070B] rounded-xl border border-gray-900 overflow-hidden relative mt-2 w-full h-full min-h-[350px]">
-                <iframe
-                  src={`https://s.tradingview.com/widgetembed/?symbol=${getTradingViewSymbol(activeSymbol)}&theme=dark&style=1&timezone=exchange&locale=en`}
-                  width="100%"
-                  height="100%"
-                  className="w-full h-full border-0 rounded-xl"
-                  allowFullScreen
-                ></iframe>
-              </div>
-            ) : (
-              <div className="flex-grow bg-[#05070B] rounded-xl border border-gray-900 overflow-hidden relative mt-2 flex items-center justify-center">
-                <svg
-                  ref={svgRef}
-                  width="100%"
-                  height="100%"
-                  viewBox={`0 0 ${width} ${totalHeight}`}
-                  preserveAspectRatio="none"
-                  onMouseMove={handleMouseMove}
-                  onMouseLeave={handleMouseLeave}
-                  onMouseUp={handleMouseUp}
-                  className="cursor-crosshair overflow-visible"
-                >
+            {/* THE RENDERED SVG INTERACTIVE CANDLESTICK CHART */}
+            <div className="flex-grow bg-[#05070B] rounded-xl border border-gray-900 overflow-hidden relative mt-2 flex items-center justify-center">
+              <svg
+                ref={svgRef}
+                width="100%"
+                height="100%"
+                viewBox={`0 0 ${width} ${totalHeight}`}
+                preserveAspectRatio="none"
+                onMouseDown={handleMouseDown}
+                onMouseMove={handleMouseMove}
+                onMouseLeave={handleMouseLeave}
+                onMouseUp={handleMouseUp}
+                onWheel={handleWheel}
+                onTouchStart={handleTouchStart}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
+                className="cursor-crosshair overflow-visible"
+              >
                 {/* Horizontal Grid lines */}
                 {Array.from({ length: 6 }).map((_, i) => {
                   const yVal = 15 + (mainChartHeight / 5) * i;
@@ -848,10 +1551,13 @@ export default function TradingTerminal({
                   />
                 )}
 
+                {/* Render advanced drawing analysis tools */}
+                {renderDrawings()}
+
                 {/* Interactive ACTIVE POSITIONS Lines (Displays Stop Loss / Take Profit visually on chart with Exness dragging!) */}
                 {openPositions.filter(p => p.asset === activeSymbol).map((p) => {
                   const entryY = getY(p.entryPrice);
-                  const pipSize = ASSET_PROPERTIES[p.asset]?.pipSize || 0.0001;
+                  const pipSize = getPipSize(p.asset);
                   const digits = ASSET_PROPERTIES[p.asset]?.digits || 2;
 
                   const isDraggingSL = activeDrag && activeDrag.tradeId === p.id && activeDrag.type === 'sl';
@@ -1157,11 +1863,11 @@ export default function TradingTerminal({
               </svg>
 
               {/* Time display indicator inside the chart */}
-              <div className="absolute bottom-1 left-2 font-mono text-[9px] text-gray-600 bg-[#05070B] px-1.5 py-0.5 rounded">
-                SIMULATION SERVER TIME: {new Date().toLocaleTimeString()}
+              <div className="absolute bottom-1 left-2 font-mono text-[9px] text-emerald-500 bg-[#05070B] border border-emerald-950/40 px-1.5 py-0.5 rounded flex items-center gap-1.5 shadow">
+                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
+                LIVE MARKET FEED • EST: {new Date().toLocaleTimeString()}
               </div>
             </div>
-            )}
           </div>
 
           {/* LOWER TABS: POSITIONS & AUDITS (Height responsive) */}
@@ -1201,123 +1907,150 @@ export default function TradingTerminal({
 
             {/* List panel */}
             <div className="flex-grow overflow-y-auto text-[11px] font-mono pr-1">
-              {activeTab === 'positions' && (
-                <div className="space-y-1">
-                  {openPositions.length === 0 ? (
-                    <p className="text-gray-600 text-center py-6">No open operations on this account.</p>
-                  ) : (
-                    <>
-                      {/* Mobile Card Layout */}
-                      <div className="block md:hidden space-y-2">
-                        {openPositions.map((p) => {
-                          const isUp = p.profitLoss >= 0;
-                          const props = ASSET_PROPERTIES[p.asset] || { pipSize: 0.0001 };
-                          const diff = p.direction === 'buy' ? p.currentPrice - p.entryPrice : p.entryPrice - p.currentPrice;
-                          const pips = diff / props.pipSize;
-                          return (
-                            <div key={p.id} className="bg-gray-900/40 p-3 rounded-lg border border-gray-800/60 space-y-2 text-left">
-                              <div className="flex justify-between items-center">
-                                <div className="flex items-center gap-1.5">
-                                  <span className="font-bold text-white text-xs">{p.asset}</span>
-                                  <span className={`px-1 rounded text-[9px] font-bold ${p.direction === 'buy' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
-                                    {p.direction.toUpperCase()}
-                                  </span>
-                                  <span className="text-gray-500 text-[9px]">#{p.id}</span>
-                                </div>
-                                <div className="text-right">
-                                  <div className={`font-bold text-xs ${isUp ? 'text-emerald-400' : 'text-red-400'}`}>
-                                    ${p.profitLoss.toFixed(2)}
-                                  </div>
-                                  <div className={`text-[9px] font-normal font-sans ${pips >= 0 ? 'text-emerald-400/80' : 'text-red-400/80'}`}>
-                                    {pips >= 0 ? '+' : ''}{pips.toFixed(1)} pips
-                                  </div>
-                                </div>
-                              </div>
+              {activeTab === 'positions' && (() => {
+                const floatingPL = openPositions.reduce((sum, pos) => sum + pos.profitLoss, 0);
+                const equity = activeAccount.balance + floatingPL;
+                const usedMargin = openPositions.reduce((total, pos) => {
+                  const props = ASSET_PROPERTIES[pos.asset] || { contractSize: 100000 };
+                  const baseToUsd = getClientBaseToUSDExchangeRate(pos.asset);
+                  const posLeverage = pos.leverage || leverage || 100;
+                  return total + (pos.lotSize * props.contractSize * baseToUsd) / posLeverage;
+                }, 0);
+                const freeMargin = Math.max(0, equity - usedMargin);
+                const marginLevel = usedMargin > 0 ? (equity / usedMargin) * 100 : 0;
 
-                              <div className="grid grid-cols-2 gap-y-1 text-[10px] text-gray-400 border-t border-gray-800/40 pt-1.5">
-                                <div>
-                                  <span className="text-gray-500">Lots:</span> <span className="text-gray-200">{p.lotSize}</span>
-                                </div>
-                                <div>
-                                  <span className="text-gray-500">Entry:</span> <span className="text-gray-200">{p.entryPrice.toFixed(ASSET_PROPERTIES[p.asset]?.digits || 2)}</span>
-                                </div>
-                                <div>
-                                  <span className="text-gray-500">Current:</span> <span className="text-gray-200">{p.currentPrice.toFixed(ASSET_PROPERTIES[p.asset]?.digits || 2)}</span>
-                                </div>
-                              </div>
-
-                              <div className="flex justify-end pt-1">
-                                <button
-                                  onClick={() => onCloseTrade(p.id)}
-                                  className="w-full bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500 hover:text-white py-1.5 rounded text-[10px] font-bold transition-colors cursor-pointer"
-                                >
-                                  Close Position
-                                </button>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      {/* Desktop Table Layout */}
-                      <div className="hidden md:block overflow-x-auto">
-                        <table className="w-full text-left">
-                          <thead>
-                            <tr className="text-gray-500 border-b border-gray-900 pb-1 text-[10px]">
-                              <th className="pb-1">ID</th>
-                              <th className="pb-1">Symbol</th>
-                              <th className="pb-1">Direction</th>
-                              <th className="pb-1">Lots</th>
-                              <th className="pb-1">Entry</th>
-                              <th className="pb-1">Current</th>
-                              <th className="pb-1 text-right">Profit/Loss</th>
-                              <th className="pb-1 text-right">Action</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-950">
-                            {openPositions.map((p) => {
-                              const isUp = p.profitLoss >= 0;
-                              const props = ASSET_PROPERTIES[p.asset] || { pipSize: 0.0001 };
-                              const diff = p.direction === 'buy' ? p.currentPrice - p.entryPrice : p.entryPrice - p.currentPrice;
-                              const pips = diff / props.pipSize;
-                              return (
-                                <tr key={p.id} className="hover:bg-gray-900/40">
-                                  <td className="py-2 text-gray-500">{p.id}</td>
-                                  <td className="py-2 font-bold text-white">{p.asset}</td>
-                                  <td className="py-2">
-                                    <span className={`px-1 rounded text-xxs font-bold ${p.direction === 'buy' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
+                return (
+                  <div className="space-y-1">
+                    {openPositions.length === 0 ? (
+                      <p className="text-gray-600 text-center py-6">No open operations on this account.</p>
+                    ) : (
+                      <>
+                        {/* Mobile Card Layout */}
+                        <div className="block md:hidden space-y-2">
+                          {openPositions.map((p) => {
+                            const isUp = p.profitLoss >= 0;
+                            const pipSize = getPipSize(p.asset);
+                            const diff = p.direction === 'buy' ? p.currentPrice - p.entryPrice : p.entryPrice - p.currentPrice;
+                            const pips = diff / pipSize;
+                            return (
+                              <div key={p.id} className="bg-gray-900/40 p-3 rounded-lg border border-gray-800/60 space-y-2 text-left">
+                                <div className="flex justify-between items-center">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-bold text-white text-xs">{p.asset}</span>
+                                    <span className={`px-1 rounded text-[9px] font-bold ${p.direction === 'buy' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
                                       {p.direction.toUpperCase()}
                                     </span>
-                                  </td>
-                                  <td className="py-2 text-gray-300">{p.lotSize}</td>
-                                  <td className="py-2 text-gray-300">{p.entryPrice.toFixed(ASSET_PROPERTIES[p.asset]?.digits || 2)}</td>
-                                  <td className="py-2 text-gray-300">{p.currentPrice.toFixed(ASSET_PROPERTIES[p.asset]?.digits || 2)}</td>
-                                  <td className="py-2 text-right">
-                                    <div className={`font-bold ${isUp ? 'text-emerald-400' : 'text-red-400'}`}>
+                                    <span className="text-gray-500 text-[9px]">#{p.id}</span>
+                                  </div>
+                                  <div className="text-right">
+                                    <div className={`font-bold text-xs ${isUp ? 'text-emerald-400' : 'text-red-400'}`}>
                                       ${p.profitLoss.toFixed(2)}
                                     </div>
-                                    <div className={`text-[10px] font-normal font-sans ${pips >= 0 ? 'text-emerald-400/80' : 'text-red-400/80'}`}>
+                                    <div className={`text-[9px] font-normal font-sans ${pips >= 0 ? 'text-emerald-400/80' : 'text-red-400/80'}`}>
                                       {pips >= 0 ? '+' : ''}{pips.toFixed(1)} pips
                                     </div>
-                                  </td>
-                                  <td className="py-2 text-right">
-                                    <button
-                                      onClick={() => onCloseTrade(p.id)}
-                                      className="bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500 hover:text-white px-2 py-0.5 rounded text-[9px] transition-colors cursor-pointer"
-                                    >
-                                      Close
-                                    </button>
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    </>
-                  )}
-                </div>
-              )}
+                                  </div>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-y-1 text-[10px] text-gray-400 border-t border-gray-800/40 pt-1.5">
+                                  <div>
+                                    <span className="text-gray-500">Lots:</span> <span className="text-gray-200">{p.lotSize}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-gray-500">Entry:</span> <span className="text-gray-200">{p.entryPrice.toFixed(ASSET_PROPERTIES[p.asset]?.digits || 2)}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-gray-500">Current:</span> <span className="text-gray-200">{p.currentPrice.toFixed(ASSET_PROPERTIES[p.asset]?.digits || 2)}</span>
+                                  </div>
+                                </div>
+
+                                <div className="flex justify-end pt-1">
+                                  <button
+                                    onClick={() => onCloseTrade(p.id)}
+                                    className="w-full bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500 hover:text-white py-1.5 rounded text-[10px] font-bold transition-colors cursor-pointer"
+                                  >
+                                    Close Position
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* Desktop Table Layout */}
+                        <div className="hidden md:block overflow-x-auto">
+                          <table className="w-full text-left">
+                            <thead>
+                              <tr className="text-gray-500 border-b border-gray-900 pb-1 text-[10px]">
+                                <th className="pb-1">ID</th>
+                                <th className="pb-1">Symbol</th>
+                                <th className="pb-1">Direction</th>
+                                <th className="pb-1">Lots</th>
+                                <th className="pb-1">Entry</th>
+                                <th className="pb-1">Current</th>
+                                <th className="pb-1 text-right">Profit/Loss</th>
+                                <th className="pb-1 text-right">Action</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-950">
+                              {openPositions.map((p) => {
+                                const isUp = p.profitLoss >= 0;
+                                const pipSize = getPipSize(p.asset);
+                                const diff = p.direction === 'buy' ? p.currentPrice - p.entryPrice : p.entryPrice - p.currentPrice;
+                                const pips = diff / pipSize;
+                                return (
+                                  <tr key={p.id} className="hover:bg-gray-900/40">
+                                    <td className="py-2 text-gray-500">{p.id}</td>
+                                    <td className="py-2 font-bold text-white">{p.asset}</td>
+                                    <td className="py-2">
+                                      <span className={`px-1 rounded text-xxs font-bold ${p.direction === 'buy' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
+                                        {p.direction.toUpperCase()}
+                                      </span>
+                                    </td>
+                                    <td className="py-2 text-gray-300">{p.lotSize}</td>
+                                    <td className="py-2 text-gray-300">{p.entryPrice.toFixed(ASSET_PROPERTIES[p.asset]?.digits || 2)}</td>
+                                    <td className="py-2 text-gray-300">{p.currentPrice.toFixed(ASSET_PROPERTIES[p.asset]?.digits || 2)}</td>
+                                    <td className="py-2 text-right">
+                                      <div className={`font-bold ${isUp ? 'text-emerald-400' : 'text-red-400'}`}>
+                                        ${p.profitLoss.toFixed(2)}
+                                      </div>
+                                      <div className={`text-[10px] font-normal font-sans ${pips >= 0 ? 'text-emerald-400/80' : 'text-red-400/80'}`}>
+                                        {pips >= 0 ? '+' : ''}{pips.toFixed(1)} pips
+                                      </div>
+                                    </td>
+                                    <td className="py-2 text-right">
+                                      <button
+                                        onClick={() => onCloseTrade(p.id)}
+                                        className="bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500 hover:text-white px-2 py-0.5 rounded text-[9px] transition-colors cursor-pointer"
+                                      >
+                                        Close
+                                      </button>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {/* MT5-Style Unified Account Info Summary Bar */}
+                        <div className="mt-2 flex flex-wrap gap-4 items-center justify-between bg-[#111622]/40 border border-gray-900 rounded-lg p-2.5 px-4 font-mono text-[10px] text-gray-400">
+                          <div className="flex flex-wrap gap-x-5 gap-y-1">
+                            <span>Balance: <strong className="text-white">${activeAccount.balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
+                            <span>Equity: <strong className="text-white">${equity.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
+                            <span>Margin: <strong className="text-white">${usedMargin.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
+                            <span>Free Margin: <strong className="text-amber-400">${freeMargin.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
+                            <span>Margin Level: <strong className={`${marginLevel >= 500 ? 'text-emerald-400' : marginLevel >= 150 ? 'text-amber-400' : 'text-red-400'} font-bold`}>{usedMargin > 0 ? `${marginLevel.toFixed(2)}%` : '0.00%'}</strong></span>
+                          </div>
+                          <div>
+                            <span>Total P&L: <strong className={`font-bold ${floatingPL >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{floatingPL >= 0 ? '+' : ''}${floatingPL.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
 
               {activeTab === 'history' && (
                 <div className="space-y-1">
@@ -1329,9 +2062,9 @@ export default function TradingTerminal({
                       <div className="block md:hidden space-y-2">
                         {closedTrades.map((p) => {
                           const isUp = p.profitLoss >= 0;
-                          const props = ASSET_PROPERTIES[p.asset] || { pipSize: 0.0001 };
+                          const pipSize = getPipSize(p.asset);
                           const diff = p.direction === 'buy' ? (p.exitPrice || p.entryPrice) - p.entryPrice : p.entryPrice - (p.exitPrice || p.entryPrice);
-                          const pips = diff / props.pipSize;
+                          const pips = diff / pipSize;
                           return (
                             <div key={p.id} className="bg-gray-900/40 p-3 rounded-lg border border-gray-800/60 space-y-1 text-left">
                               <div className="flex justify-between items-center">
@@ -1384,9 +2117,9 @@ export default function TradingTerminal({
                           <tbody className="divide-y divide-gray-950">
                             {closedTrades.map((p) => {
                               const isUp = p.profitLoss >= 0;
-                              const props = ASSET_PROPERTIES[p.asset] || { pipSize: 0.0001 };
+                              const pipSize = getPipSize(p.asset);
                               const diff = p.direction === 'buy' ? (p.exitPrice || p.entryPrice) - p.entryPrice : p.entryPrice - (p.exitPrice || p.entryPrice);
-                              const pips = diff / props.pipSize;
+                              const pips = diff / pipSize;
                               return (
                                 <tr key={p.id}>
                                   <td className="py-1 text-gray-600">{p.id}</td>
@@ -1591,12 +2324,10 @@ export default function TradingTerminal({
                   <p className="text-sm font-bold text-amber-400 font-mono">
                     {(() => {
                       const usedMargin = openPositions.reduce((total, pos) => {
-                        const prop = ASSET_PROPERTIES[pos.asset] || { lotSizeMultiplier: 100000 };
-                        const mult = prop.lotSizeMultiplier;
-                        const upper = pos.asset.toUpperCase().replace('/', '');
-                        const usdPrice = upper.startsWith('USD') && (upper.endsWith('JPY') || upper.endsWith('CHF') || upper.endsWith('CAD')) ? 1.0 : pos.entryPrice;
-                        const posLeverage = pos.leverage || leverage || 2000;
-                        return total + (pos.lotSize * mult * usdPrice) / posLeverage;
+                        const props = ASSET_PROPERTIES[pos.asset] || { contractSize: 100000 };
+                        const baseToUsd = getClientBaseToUSDExchangeRate(pos.asset);
+                        const posLeverage = pos.leverage || leverage || 100;
+                        return total + (pos.lotSize * props.contractSize * baseToUsd) / posLeverage;
                       }, 0);
                       const equity = activeAccount.balance + openPositions.reduce((acc, curr) => acc + curr.profitLoss, 0);
                       return Math.max(0, equity - usedMargin);
@@ -1606,15 +2337,52 @@ export default function TradingTerminal({
                 <div className="col-span-2 pt-2 border-t border-gray-950 flex justify-between items-center text-[9px] font-mono">
                   <span className="text-gray-500">Margin Used:</span>
                   <span className="text-gray-300 font-bold">
-                    {openPositions.reduce((total, pos) => {
-                      const prop = ASSET_PROPERTIES[pos.asset] || { lotSizeMultiplier: 100000 };
-                      const mult = prop.lotSizeMultiplier;
-                      const upper = pos.asset.toUpperCase().replace('/', '');
-                      const usdPrice = upper.startsWith('USD') && (upper.endsWith('JPY') || upper.endsWith('CHF') || upper.endsWith('CAD')) ? 1.0 : pos.entryPrice;
-                      const posLeverage = pos.leverage || leverage || 2000;
-                      return total + (pos.lotSize * mult * usdPrice) / posLeverage;
-                    }, 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+                    {(() => {
+                      const usedMargin = openPositions.reduce((total, pos) => {
+                        const props = ASSET_PROPERTIES[pos.asset] || { contractSize: 100000 };
+                        const baseToUsd = getClientBaseToUSDExchangeRate(pos.asset);
+                        const posLeverage = pos.leverage || leverage || 100;
+                        return total + (pos.lotSize * props.contractSize * baseToUsd) / posLeverage;
+                      }, 0);
+                      return usedMargin;
+                    })().toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
                   </span>
+                </div>
+                <div className="col-span-2 pt-1 flex justify-between items-center text-[9px] font-mono">
+                  <span className="text-gray-500">Margin Level:</span>
+                  <span className="text-gray-300 font-bold">
+                    {(() => {
+                      const usedMargin = openPositions.reduce((total, pos) => {
+                        const props = ASSET_PROPERTIES[pos.asset] || { contractSize: 100000 };
+                        const baseToUsd = getClientBaseToUSDExchangeRate(pos.asset);
+                        const posLeverage = pos.leverage || leverage || 100;
+                        return total + (pos.lotSize * props.contractSize * baseToUsd) / posLeverage;
+                      }, 0);
+                      const equity = activeAccount.balance + openPositions.reduce((acc, curr) => acc + curr.profitLoss, 0);
+                      const marginLevel = usedMargin > 0 ? (equity / usedMargin) * 100 : 0;
+                      return usedMargin > 0 ? `${marginLevel.toFixed(2)}%` : '0.00%';
+                    })()}
+                  </span>
+                </div>
+              </div>
+
+              {/* Risk Rules section inside Account Details */}
+              <div className="mt-3 bg-gradient-to-br from-[#111622]/40 to-[#0A0D14]/80 p-3 rounded-xl border border-gray-900/60 shadow-md">
+                <div className="flex justify-between items-center mb-1.5 pb-1 border-b border-gray-900/60">
+                  <span className="text-[9px] font-mono font-bold text-gray-400 uppercase tracking-wider">
+                    Risk Management Rules
+                  </span>
+                  <span className="text-[8px] px-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 font-mono font-bold rounded uppercase">Active</span>
+                </div>
+                <div className="space-y-1 text-[9px] font-mono text-gray-400">
+                  <div className={`flex justify-between items-center p-1 rounded ${activeAccount.challengeSize === 5000 ? 'bg-amber-500/10 text-white font-bold border border-amber-500/20' : 'bg-gray-950/40'}`}>
+                    <span>5K Account:</span>
+                    <span className={activeAccount.challengeSize === 5000 ? 'text-amber-400 font-bold' : 'text-gray-500'}>Max Lot Size: 0.50</span>
+                  </div>
+                  <div className={`flex justify-between items-center p-1 rounded ${activeAccount.challengeSize === 10000 ? 'bg-amber-500/10 text-white font-bold border border-amber-500/20' : 'bg-gray-950/40'}`}>
+                    <span>10K Account:</span>
+                    <span className={activeAccount.challengeSize === 10000 ? 'text-amber-400 font-bold' : 'text-gray-500'}>Max Lot Size: 1.00</span>
+                  </div>
                 </div>
               </div>
 
@@ -1673,7 +2441,7 @@ export default function TradingTerminal({
                     min="0.01"
                     max="100"
                     required
-                    className="flex-grow bg-gray-950 border border-gray-900 rounded-lg py-1.5 text-center font-mono font-bold text-white text-sm focus:outline-none focus:border-amber-500"
+                    className={`flex-grow bg-gray-950 border rounded-lg py-1.5 text-center font-mono font-bold text-sm focus:outline-none transition-colors ${isLotSizeExceeded ? 'text-red-400 border-red-500 focus:border-red-500' : 'text-white border-gray-900 focus:border-amber-500'}`}
                     value={lotSize}
                     onChange={(e) => setLotSize(Number(e.target.value))}
                   />
@@ -1692,6 +2460,12 @@ export default function TradingTerminal({
                     {((lotSize * (ASSET_PROPERTIES[activeSymbol]?.lotSizeMultiplier || 100000) * (activeSymbol === 'USD/JPY' ? 1 : activeQuote.price)) / leverage).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
                   </span>
                 </div>
+                {isLotSizeExceeded && (
+                  <div className="mt-2 bg-red-500/10 border border-red-500/30 text-red-400 p-2 rounded-lg text-[10px] leading-normal font-medium flex items-start gap-1.5 animate-pulse">
+                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                    <span>{lotSizeWarningMessage}</span>
+                  </div>
+                )}
               </div>
 
               {/* Stop Loss & Take Profit with Quick Pips adjustment */}
@@ -1703,7 +2477,7 @@ export default function TradingTerminal({
                     <button 
                       type="button"
                       onClick={() => {
-                        const pipVal = ASSET_PROPERTIES[activeSymbol]?.pipSize || 0.0001;
+                        const pipVal = getPipSize(activeSymbol);
                         const defaultSL = direction === 'buy' ? activeQuote.price - 30 * pipVal : activeQuote.price + 30 * pipVal;
                         setStopLoss(defaultSL.toFixed(ASSET_PROPERTIES[activeSymbol]?.digits || 5));
                       }}
@@ -1726,7 +2500,7 @@ export default function TradingTerminal({
                         key={pips}
                         type="button"
                         onClick={() => {
-                          const pipVal = ASSET_PROPERTIES[activeSymbol]?.pipSize || 0.0001;
+                          const pipVal = getPipSize(activeSymbol);
                           const currentPrice = activeQuote.price;
                           const newSL = direction === 'buy' ? currentPrice - pips * pipVal : currentPrice + pips * pipVal;
                           setStopLoss(newSL.toFixed(ASSET_PROPERTIES[activeSymbol]?.digits || 5));
@@ -1746,7 +2520,7 @@ export default function TradingTerminal({
                     <button 
                       type="button"
                       onClick={() => {
-                        const pipVal = ASSET_PROPERTIES[activeSymbol]?.pipSize || 0.0001;
+                        const pipVal = getPipSize(activeSymbol);
                         const defaultTP = direction === 'buy' ? activeQuote.price + 60 * pipVal : activeQuote.price - 60 * pipVal;
                         setTakeProfit(defaultTP.toFixed(ASSET_PROPERTIES[activeSymbol]?.digits || 5));
                       }}
@@ -1769,7 +2543,7 @@ export default function TradingTerminal({
                         key={pips}
                         type="button"
                         onClick={() => {
-                          const pipVal = ASSET_PROPERTIES[activeSymbol]?.pipSize || 0.0001;
+                          const pipVal = getPipSize(activeSymbol);
                           const currentPrice = activeQuote.price;
                           const newTP = direction === 'buy' ? currentPrice + pips * pipVal : currentPrice - pips * pipVal;
                           setTakeProfit(newTP.toFixed(ASSET_PROPERTIES[activeSymbol]?.digits || 5));
@@ -1888,15 +2662,15 @@ export default function TradingTerminal({
               {/* Spread and Specification Details footer */}
               <div className="bg-[#05070B] border border-gray-950 p-2.5 rounded-lg text-[9px] font-mono space-y-1">
                 <div className="flex justify-between text-gray-500">
-                  <span>Simulated Spread:</span>
+                  <span>Market Spread:</span>
                   <span className="text-gray-300 font-bold">
-                    {((ASSET_PROPERTIES[activeSymbol]?.spread || 0) / (ASSET_PROPERTIES[activeSymbol]?.pipSize || 0.0001)).toFixed(1)} Pips
+                    {((ASSET_PROPERTIES[activeSymbol]?.spread || 0) / getPipSize(activeSymbol)).toFixed(1)} Pips
                   </span>
                 </div>
                 <div className="flex justify-between text-gray-500">
                   <span>Est. Pip Value (1L):</span>
                   <span className="text-gray-300 font-bold">
-                    {((ASSET_PROPERTIES[activeSymbol]?.pipSize || 0.0001) * 1.0 * (ASSET_PROPERTIES[activeSymbol]?.lotSizeMultiplier || 100000)).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+                    {(getPipSize(activeSymbol) * 1.0 * (ASSET_PROPERTIES[activeSymbol]?.lotSizeMultiplier || 100000)).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
                   </span>
                 </div>
               </div>

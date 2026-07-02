@@ -8,6 +8,7 @@ import LandingPage from './components/LandingPage';
 import Dashboard from './components/Dashboard';
 import AdminPanel from './components/AdminPanel';
 import TradingTerminal from './components/TradingTerminal';
+import { MarketDataProvider } from './context/MarketDataContext';
 import { ShieldAlert, Award, FileText, CheckCircle2, ChevronRight, AlertTriangle } from 'lucide-react';
 
 // Help generate beautiful historical candles for all assets
@@ -50,7 +51,7 @@ export default function App() {
     return (stored as 'landing' | 'dashboard') || 'landing';
   });
   const [pendingChallenge, setPendingChallenge] = useState<ChallengeConfig | null>(null);
-  const [dashboardTab, setDashboardTab] = useState<'accounts' | 'leaderboard' | 'kyc' | 'certificates' | 'logs' | 'referrals'>('accounts');
+  const [dashboardTab, setDashboardTab] = useState<'accounts' | 'leaderboard' | 'kyc' | 'logs' | 'referrals'>('accounts');
 
   useEffect(() => {
     localStorage.setItem('at_current_view', currentView);
@@ -211,268 +212,7 @@ export default function App() {
     // Real-time server authoritative updates are polled.
   }, []);
 
-  /* OBSOLETE SIMULATOR BLOCK COMMENTED OUT:
-  if (!quote) return trade;
 
-          const props = ASSET_PROPERTIES[trade.asset];
-          const multiplier = props?.lotSizeMultiplier || 1;
-
-          // A: Handle pending limit/stop fills
-          if (trade.orderType !== 'market' && trade.triggerPrice !== undefined) {
-            const currentPrice = quote.price;
-            const trigger = trade.triggerPrice;
-            let fill = false;
-
-            if (trade.orderType === 'limit') {
-              if (trade.direction === 'buy' && currentPrice <= trigger) fill = true;
-              if (trade.direction === 'sell' && currentPrice >= trigger) fill = true;
-            } else if (trade.orderType === 'stop') {
-              if (trade.direction === 'buy' && currentPrice >= trigger) fill = true;
-              if (trade.direction === 'sell' && currentPrice <= trigger) fill = true;
-            }
-
-            if (fill) {
-              tradeChanged = true;
-              // Log fill event
-              setAccountLogs(prevLogs => [
-                {
-                  id: `log-${Date.now()}`,
-                  accountId: trade.accountId,
-                  message: `Pending ${trade.orderType.toUpperCase()} order filled at ${trigger}. Symbol: ${trade.asset}, Lot: ${trade.lotSize}`,
-                  type: 'success',
-                  timestamp: new Date().toISOString()
-                },
-                ...prevLogs
-              ]);
-
-              return {
-                ...trade,
-                orderType: 'market',
-                entryPrice: trigger,
-                currentPrice: currentPrice,
-                profitLoss: 0
-              };
-            }
-            return trade;
-          }
-
-          // B: Track live open positions profit/loss
-          const currentPrice = quote.price;
-          const delta = trade.direction === 'buy' 
-            ? currentPrice - trade.entryPrice 
-            : trade.entryPrice - currentPrice;
-
-          const profitLoss = delta * trade.lotSize * multiplier;
-
-          // C: Check SL/TP triggers
-          let shouldClose = false;
-          let closeReason = 'manual';
-          let exitPrice = currentPrice;
-
-          if (trade.stopLoss !== undefined) {
-            if (trade.direction === 'buy' && currentPrice <= trade.stopLoss) {
-              shouldClose = true;
-              closeReason = 'sl';
-              exitPrice = trade.stopLoss;
-            } else if (trade.direction === 'sell' && currentPrice >= trade.stopLoss) {
-              shouldClose = true;
-              closeReason = 'sl';
-              exitPrice = trade.stopLoss;
-            }
-          }
-
-          if (trade.takeProfit !== undefined) {
-            if (trade.direction === 'buy' && currentPrice >= trade.takeProfit) {
-              shouldClose = true;
-              closeReason = 'tp';
-              exitPrice = trade.takeProfit;
-            } else if (trade.direction === 'sell' && currentPrice <= trade.takeProfit) {
-              shouldClose = true;
-              closeReason = 'tp';
-              exitPrice = trade.takeProfit;
-            }
-          }
-
-          if (shouldClose) {
-            tradeChanged = true;
-            const finalProfitLoss = (trade.direction === 'buy' ? exitPrice - trade.entryPrice : trade.entryPrice - exitPrice) * trade.lotSize * multiplier;
-
-            // Log triggers
-            setAccountLogs(prevLogs => [
-              {
-                id: `log-${Date.now()}`,
-                accountId: trade.accountId,
-                message: `Position closed by ${closeReason.toUpperCase()} at ${exitPrice}. Net profit/loss: $${finalProfitLoss.toFixed(2)}`,
-                type: finalProfitLoss >= 0 ? 'success' : 'warning',
-                timestamp: new Date().toISOString()
-              },
-              ...prevLogs
-            ]);
-
-            // Adjust account balances
-            setAccounts(prevAccs => prevAccs.map(acc => {
-              if (acc.id === trade.accountId) {
-                return {
-                  ...acc,
-                  balance: Math.round((acc.balance + finalProfitLoss) * 100) / 100
-                };
-              }
-              return acc;
-            }));
-
-            return {
-              ...trade,
-              currentPrice: exitPrice,
-              exitPrice,
-              profitLoss: finalProfitLoss,
-              status: 'closed',
-              reason: closeReason,
-              closedAt: new Date().toISOString()
-            };
-          }
-
-          if (profitLoss !== trade.profitLoss || currentPrice !== trade.currentPrice) {
-            tradeChanged = true;
-            return {
-              ...trade,
-              currentPrice,
-              profitLoss
-            };
-          }
-
-          return trade;
-        });
-        return updatedTrades;
-      });
-
-      // 4. Drawdowns & Prop rules checks
-      setAccounts(prevAccounts => {
-        return prevAccounts.map(account => {
-          if (account.status !== 'active') return account;
-
-          // Find open trades for this account
-          const openForAcc = trades.filter(t => t.accountId === account.id && t.status === 'open' && t.orderType === 'market');
-          const sumPL = openForAcc.reduce((acc, curr) => acc + curr.profitLoss, 0);
-          
-          // Equity calculations
-          const equity = account.balance + sumPL;
-          const peak = Math.max(account.peakBalance, equity);
-
-          // Drawdowns calculation
-          const todayDrawdownVal = account.startOfDayBalance - equity;
-          const cumulativeDrawdownVal = account.initialBalance - equity;
-
-          let status = account.status;
-          let phase = account.phase;
-
-          // Check for Drawdown Breach
-          const hitDailyDrawdown = todayDrawdownVal > account.dailyDrawdownLimitValue;
-          const hitMaxDrawdown = cumulativeDrawdownVal > account.maxDrawdownLimitValue;
-
-          if (hitDailyDrawdown || hitMaxDrawdown) {
-            status = 'breached';
-            
-            // Auto close all open trades
-            setTrades(prevT => prevT.map(t => {
-              if (t.accountId === account.id && t.status === 'open') {
-                return {
-                  ...t,
-                  status: 'closed',
-                  reason: 'breach_close',
-                  closedAt: new Date().toISOString(),
-                  exitPrice: t.currentPrice
-                };
-              }
-              return t;
-            }));
-
-            let breachMsg = '';
-            let breachReasonName = '';
-            if (hitDailyDrawdown) {
-              breachMsg = `Daily drawdown limit exceeded ($${todayDrawdownVal.toFixed(2)} vs Max $${account.dailyDrawdownLimitValue.toFixed(2)}).`;
-              breachReasonName = 'Daily Drawdown Limit Exceeded';
-            } else {
-              breachMsg = `Maximum cumulative drawdown limit exceeded ($${cumulativeDrawdownVal.toFixed(2)} vs Max $${account.maxDrawdownLimitValue.toFixed(2)}).`;
-              breachReasonName = 'Max Cumulative Drawdown Exceeded';
-            }
-
-            // Log critical breach
-            setAccountLogs(prevLogs => [
-              {
-                id: `log-${Date.now()}`,
-                accountId: account.id,
-                message: `CRITICAL RISK BREACH: ${breachMsg} Account disabled.`,
-                type: 'danger',
-                timestamp: new Date().toISOString()
-              },
-              ...prevLogs
-            ]);
-
-            // Set breach modal state
-            setBreachedAccountNotification({
-              id: account.id,
-              reason: breachReasonName,
-              message: breachMsg
-            });
-
-            // Exit active trading terminal immediately if this account is active
-            if (activeTerminalAccount?.id === account.id) {
-              setActiveTerminalAccount(null);
-            }
-          }
-
-          // B: Validate Phase Target Met (Only if not breached and has open trades resolved)
-          const targetPercent = phase === 'phase1' ? 8 : phase === 'phase2' ? 5 : 0;
-          const targetRequired = account.initialBalance * (targetPercent / 100);
-          const currentProfit = account.balance - account.initialBalance;
-
-          if (status === 'active' && targetPercent > 0 && currentProfit >= targetRequired && openForAcc.length === 0) {
-            // Evaluates pass ONLY when all trades are fully closed
-            if (phase === 'phase1') {
-              status = 'passed_phase1';
-              phase = 'phase2';
-              
-              setAccountLogs(prevLogs => [
-                {
-                  id: `log-${Date.now()}`,
-                  accountId: account.id,
-                  message: `Phase 1 evaluation target met successfully (+${currentProfit.toFixed(2)}). Account updated to Phase 2.`,
-                  type: 'success',
-                  timestamp: new Date().toISOString()
-                },
-                ...prevLogs
-              ]);
-            } else if (phase === 'phase2') {
-              status = 'passed_phase2';
-              phase = 'funded';
-
-              setAccountLogs(prevLogs => [
-                {
-                  id: `log-${Date.now()}`,
-                  accountId: account.id,
-                  message: `Phase 2 evaluation target met successfully (+${currentProfit.toFixed(2)}). Institutional funding credential UNLOCKED!`,
-                  type: 'success',
-                  timestamp: new Date().toISOString()
-                },
-                ...prevLogs
-              ]);
-            }
-          }
-
-          return {
-            ...account,
-            peakBalance: peak,
-            status,
-            phase
-          };
-        });
-      });
-
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [trades, activeTerminalAccount]);
-  */
 
   // Sync helper to fetch the state instantly after actions
   const syncStateWithServer = async () => {
@@ -552,7 +292,12 @@ export default function App() {
 
       if (!res.ok) {
         const err = await res.json();
-        alert(`Trade Execution Error: ${err.error || 'Unknown error'}`);
+        const errMsg = err.error || 'Unknown error';
+        if (errMsg.includes('Maximum allowed lot size')) {
+          alert(errMsg);
+        } else {
+          alert(`Trade Execution Error: ${errMsg}`);
+        }
         return;
       }
 
@@ -998,24 +743,26 @@ export default function App() {
       {/* VIEW ROUTER */}
       {activeTerminalAccount ? (
         // Render MT5 trading terminal
-        <TradingTerminal
-          currentUser={currentUser!}
-          activeAccount={activeTerminalAccount}
-          quotes={quotes}
-          trades={trades}
-          candles={candles}
-          accountLogs={accountLogs}
-          ruleViolations={ruleViolations}
-          onPlaceTrade={handlePlaceTrade}
-          onCloseTrade={handleCloseTrade}
-          onCancelOrder={handleCancelOrder}
-          onModifyTrade={handleModifyTrade}
-          onBackToDashboard={() => {
-            setActiveTerminalAccount(null);
-            setCurrentView('dashboard');
-          }}
-          liveDataUnavailable={liveDataUnavailable}
-        />
+        <MarketDataProvider quotes={quotes}>
+          <TradingTerminal
+            currentUser={currentUser!}
+            activeAccount={activeTerminalAccount}
+            quotes={quotes}
+            trades={trades}
+            candles={candles}
+            accountLogs={accountLogs}
+            ruleViolations={ruleViolations}
+            onPlaceTrade={handlePlaceTrade}
+            onCloseTrade={handleCloseTrade}
+            onCancelOrder={handleCancelOrder}
+            onModifyTrade={handleModifyTrade}
+            onBackToDashboard={() => {
+              setActiveTerminalAccount(null);
+              setCurrentView('dashboard');
+            }}
+            liveDataUnavailable={liveDataUnavailable}
+          />
+        </MarketDataProvider>
       ) : showAuth ? (
         // Render Login/Signup screen
         <AuthScreen
@@ -1171,7 +918,7 @@ export default function App() {
                   <span>Instagram Official</span>
                 </a>
                 <a
-                  href="https://www.instagram.com/atfundingteam"
+                  href="https://www.instagram.com/atfunding.team"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center justify-center gap-1.5 p-2.5 rounded-lg bg-gradient-to-r from-pink-600 to-red-500 hover:opacity-90 text-white font-bold text-xs text-center transition-opacity"
@@ -1182,8 +929,8 @@ export default function App() {
 
               <div className="text-center font-mono text-[10px] text-gray-500 space-y-0.5 pt-2 border-t border-gray-800/60">
                 <p>Official Page: <a href="https://www.instagram.com/atfunding" target="_blank" rel="noopener noreferrer" className="text-amber-400 hover:underline">@atfunding</a></p>
-                <p>Support Account: <a href="https://www.instagram.com/atfundingteam" target="_blank" rel="noopener noreferrer" className="text-amber-400 hover:underline">@atfundingteam</a></p>
-                <p>Gmail: <a href="mailto:asjadtrades07@gmail.com" className="text-amber-400 hover:underline">asjadtrades07@gmail.com</a></p>
+                <p>Support Account: <a href="https://www.instagram.com/atfunding.team" target="_blank" rel="noopener noreferrer" className="text-amber-400 hover:underline">@atfunding.team</a></p>
+                <p>Gmail: <a href="mailto:ATgrowfund@gmail.com" className="text-amber-400 hover:underline">ATgrowfund@gmail.com</a></p>
               </div>
             </div>
 

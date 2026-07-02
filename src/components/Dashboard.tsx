@@ -20,7 +20,7 @@ interface DashboardProps {
   payoutRequests: PayoutRequest[];
   onCreatePayoutRequest: (req: PayoutRequest) => void;
   trades: Trade[];
-  initialTab?: 'accounts' | 'leaderboard' | 'kyc' | 'certificates' | 'logs' | 'referrals';
+  initialTab?: 'accounts' | 'leaderboard' | 'kyc' | 'logs' | 'referrals';
 }
 
 export default function Dashboard({
@@ -38,7 +38,7 @@ export default function Dashboard({
   trades,
   initialTab
 }: DashboardProps) {
-  const [activeTab, setActiveTab] = useState<'accounts' | 'leaderboard' | 'kyc' | 'certificates' | 'logs' | 'referrals'>(initialTab || 'accounts');
+  const [activeTab, setActiveTab] = useState<'accounts' | 'leaderboard' | 'kyc' | 'logs' | 'referrals'>(initialTab || 'accounts');
 
   React.useEffect(() => {
     if (initialTab) {
@@ -218,12 +218,6 @@ export default function Dashboard({
                 KYC<span className="hidden sm:inline"> Verification</span>
               </button>
               <button
-                onClick={() => setActiveTab('certificates')}
-                className={`px-2 sm:px-3 py-1.5 rounded-lg text-[10px] sm:text-xs font-medium uppercase tracking-wider transition-all cursor-pointer flex-shrink-0 ${activeTab === 'certificates' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'text-gray-400 hover:text-white'}`}
-              >
-                Certificates
-              </button>
-              <button
                 onClick={() => setActiveTab('logs')}
                 className={`px-2 sm:px-3 py-1.5 rounded-lg text-[10px] sm:text-xs font-medium uppercase tracking-wider transition-all cursor-pointer flex-shrink-0 ${activeTab === 'logs' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'text-gray-400 hover:text-white'}`}
               >
@@ -368,7 +362,9 @@ export default function Dashboard({
                             account.status === 'pending_payment' ? 'text-amber-500' :
                             account.status.startsWith('passed') ? 'text-blue-400' : 'text-red-400'
                           }`}>
-                            {account.status === 'pending_payment' ? 'PENDING' : account.status.replace('_', ' ')}
+                            {account.status === 'pending_payment' 
+                              ? (account.type === 'pass_pay_later' && account.phase === 'funded' ? 'PENDING PAYMENT' : 'PENDING ACTIVATION') 
+                              : account.status.replace('_', ' ')}
                           </p>
                         </div>
                       </div>
@@ -454,17 +450,51 @@ export default function Dashboard({
                         )}
                       </div>
 
+                      {/* Risk Rules section inside Account details card */}
+                      <div className="pt-3 border-t border-gray-800/60 space-y-1.5 mb-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-mono text-gray-500 uppercase tracking-wider font-bold">Risk Management Rules</span>
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 font-bold border border-amber-500/20 uppercase font-mono">Active</span>
+                        </div>
+                        <div className="bg-gray-950/60 border border-gray-900 rounded-lg p-2.5 space-y-1 font-mono text-[10px] text-gray-400">
+                          <div className={`flex justify-between items-center p-1 rounded ${account.challengeSize === 5000 ? 'bg-amber-500/10 text-white font-bold border border-amber-500/20' : ''}`}>
+                            <span>5K Account:</span>
+                            <span className={account.challengeSize === 5000 ? 'text-amber-400 font-bold' : 'text-gray-500'}>Max Lot Size 0.50</span>
+                          </div>
+                          <div className={`flex justify-between items-center p-1 rounded ${account.challengeSize === 10000 ? 'bg-amber-500/10 text-white font-bold border border-amber-500/20' : ''}`}>
+                            <span>10K Account:</span>
+                            <span className={account.challengeSize === 10000 ? 'text-amber-400 font-bold' : 'text-gray-500'}>Max Lot Size 1.00</span>
+                          </div>
+                        </div>
+                      </div>
+
                       {/* Action buttons */}
                       <div className="flex justify-between items-center pt-4 border-t border-gray-800/60">
                         {account.status === 'pending_payment' ? (
                           <div className="flex items-center gap-1 text-[10px] text-amber-500 font-mono">
                             <Clock className="w-3.5 h-3.5 animate-pulse" />
-                            <span>Awaiting Verification</span>
+                            <span>
+                              {account.type === 'pass_pay_later' && account.phase === 'funded' 
+                                ? 'Pending Success Fee Payment' 
+                                : account.phase === 'phase2' 
+                                ? 'Phase 2 Pending Activation' 
+                                : 'Awaiting Admin Activation'}
+                            </span>
                           </div>
-                        ) : account.phase === 'funded' || account.status.startsWith('passed') ? (
+                        ) : account.status === 'passed_phase1' ? (
                           <div className="flex items-center gap-1.5 text-xs text-emerald-400 font-mono">
                             <CheckCircle2 className="w-4 h-4" />
-                            <span>Evaluation Passed Successfully</span>
+                            <span>Phase 1 Passed Successfully</span>
+                          </div>
+                        ) : account.status === 'passed_phase2' ? (
+                          <div className="flex items-center gap-1.5 text-xs text-emerald-400 font-mono">
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>Phase 2 Passed Successfully</span>
+                          </div>
+                        ) : account.phase === 'funded' ? (
+                          <div className="flex items-center gap-1.5 text-xs text-emerald-400 font-mono">
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>Funded Account Active</span>
                           </div>
                         ) : (
                           <div className="text-[10px] text-gray-500 font-mono">
@@ -479,20 +509,11 @@ export default function Dashboard({
                             </span>
                           )}
 
-                          {(account.status === 'passed_phase1' || account.status === 'passed_phase2') && (
-                            <button
-                              onClick={() => setShowCertificate(account)}
-                              className="px-3 py-1.5 rounded bg-amber-500 text-black text-xs font-semibold hover:opacity-90 transition-all cursor-pointer flex items-center gap-1"
-                            >
-                              <Award className="w-3.5 h-3.5" />
-                              <span>View Certificate</span>
-                            </button>
-                          )}
-
                           {account.status === 'active' && (
                             <div className="flex gap-1.5">
                               <button
                                 onClick={() => {
+                                  if (account.phase !== 'funded') return;
                                   if (currentUser.kycStatus !== 'approved') {
                                     alert('KYC verification is required before requesting payouts. Please complete your KYC verification under the KYC tab first.');
                                     return;
@@ -503,7 +524,7 @@ export default function Dashboard({
                                   setPayoutAmount(Math.min(400, Math.max(25, Math.round(profit))).toString());
                                   setPayoutDetails('');
                                 }}
-                                className={`px-3 py-2 border rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
+                                className={`${account.phase !== 'funded' ? 'hidden' : 'flex'} px-3 py-2 border rounded-lg text-xs font-semibold transition-all items-center gap-1.5 cursor-pointer ${
                                   currentUser.kycStatus === 'approved'
                                     ? 'bg-emerald-500/15 hover:bg-emerald-500/25 border-emerald-500/30 text-emerald-400'
                                     : 'bg-gray-800/40 border-gray-700 text-gray-500 cursor-not-allowed hover:bg-gray-800/40'
@@ -1254,49 +1275,6 @@ export default function Dashboard({
                     )}
                   </div>
                 )}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* CERTIFICATES TAB */}
-        {activeTab === 'certificates' && (
-          <div className="space-y-8">
-            <div>
-              <h2 className="text-xl font-bold text-white">Earned Credentials & Certificates</h2>
-              <p className="text-xs text-gray-400">Unlock official certificates of achievement once evaluations are successfully completed.</p>
-            </div>
-
-            {myAccounts.filter(acc => acc.status.startsWith('passed')).length === 0 ? (
-              <div className="bg-[#0D1017] border border-gray-800 rounded-2xl p-12 text-center max-w-xl mx-auto space-y-4">
-                <div className="w-16 h-16 bg-amber-500/10 text-amber-500 rounded-full flex items-center justify-center mx-auto">
-                  <Award className="w-8 h-8" />
-                </div>
-                <h3 className="text-lg font-bold text-white">No Certificates Unlocked Yet</h3>
-                <p className="text-xs text-gray-400">
-                  Certificates are automatically issued the moment you hit the profit targets of Phase 1 and Phase 2.
-                </p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {myAccounts.filter(acc => acc.status.startsWith('passed')).map(account => (
-                  <div 
-                    key={account.id}
-                    onClick={() => setShowCertificate(account)}
-                    className="bg-[#0D1017] border border-amber-500/20 hover:border-amber-500/50 p-5 rounded-xl text-center space-y-4 cursor-pointer transition-all group"
-                  >
-                    <div className="w-12 h-12 bg-amber-500/10 rounded-full flex items-center justify-center mx-auto text-amber-500 group-hover:scale-110 transition-transform">
-                      <Award className="w-6 h-6" />
-                    </div>
-                    <div>
-                      <h4 className="font-semibold text-white text-sm">{account.challengeName}</h4>
-                      <p className="text-xxs font-mono text-amber-500/80 uppercase tracking-widest mt-1">EVALUATION CONCLUDED</p>
-                    </div>
-                    <button className="w-full bg-[#1a2030] text-gray-200 text-xxs py-1.5 rounded hover:text-white font-medium cursor-pointer">
-                      View Official Credential
-                    </button>
-                  </div>
-                ))}
               </div>
             )}
           </div>
