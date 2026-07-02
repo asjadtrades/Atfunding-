@@ -3,6 +3,10 @@ import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import nodemailer from 'nodemailer';
+import dotenv from 'dotenv';
+
+// Load environment variables
+dotenv.config();
 
 
 // Server state types (matching src/types.ts)
@@ -1527,6 +1531,119 @@ async function startServer() {
       success: true,
       message: 'A secure OTP code has been sent to your registered Gmail address. Please check your inbox or spam folder.'
     });
+  });
+
+  // SMTP DIAGNOSTICS ENDPOINT
+  app.get('/api/auth/diagnose-smtp', async (req, res) => {
+    const host = process.env.SMTP_HOST;
+    const port = parseInt(process.env.SMTP_PORT || '587');
+    const user = process.env.SMTP_USER;
+    const pass = process.env.SMTP_PASS;
+    const from = process.env.SMTP_FROM || 'ATFunding <no-reply@atfunding.com>';
+
+    const configStatus = {
+      host: host || 'MISSING',
+      port: port,
+      user: user ? `${user.substring(0, 3)}...${user.substring(user.indexOf('@') > -1 ? user.indexOf('@') : 3)}` : 'MISSING',
+      passStatus: pass ? 'PRESENT (Masked)' : 'MISSING',
+      from: from
+    };
+
+    console.log('[SMTP Diagnostic] Running diagnostics with config:', configStatus);
+
+    if (!host || !user || !pass) {
+      return res.status(400).json({
+        success: false,
+        error: 'SMTP configurations are missing or incomplete in environment.',
+        config: configStatus
+      });
+    }
+
+    try {
+      const transporter = nodemailer.createTransport({
+        host,
+        port,
+        secure: port === 465,
+        auth: { user, pass },
+        tls: { rejectUnauthorized: false }
+      });
+
+      console.log('[SMTP Diagnostic] Verifying connection...');
+      await transporter.verify();
+      console.log('[SMTP Diagnostic] Connection verified successfully!');
+
+      return res.json({
+        success: true,
+        message: 'SMTP connection handshake verified successfully! Your configuration is 100% correct.',
+        config: configStatus
+      });
+    } catch (err: any) {
+      console.error('[SMTP Diagnostic] Verification failed with error:', err);
+      return res.status(500).json({
+        success: false,
+        error: err.message || 'SMTP Handshake/Verification failed.',
+        details: err.stack || err.toString(),
+        config: configStatus
+      });
+    }
+  });
+
+  // SMTP TEST EMAIL SEND ENDPOINT
+  app.post('/api/auth/test-smtp-send', async (req, res) => {
+    const { email } = req.body;
+    const targetEmail = email || process.env.SMTP_USER || 'asjadtrades07@gmail.com';
+    
+    const host = process.env.SMTP_HOST;
+    const port = parseInt(process.env.SMTP_PORT || '587');
+    const user = process.env.SMTP_USER;
+    const pass = process.env.SMTP_PASS;
+    const from = process.env.SMTP_FROM || 'ATFunding <no-reply@atfunding.com>';
+
+    if (!host || !user || !pass) {
+      return res.status(400).json({
+        success: false,
+        error: 'SMTP configurations are missing or incomplete in environment.'
+      });
+    }
+
+    try {
+      const transporter = nodemailer.createTransport({
+        host,
+        port,
+        secure: port === 465,
+        auth: { user, pass },
+        tls: { rejectUnauthorized: false }
+      });
+
+      console.log(`[SMTP Test Send] Sending test email to ${targetEmail}...`);
+      const info = await transporter.sendMail({
+        from,
+        to: targetEmail,
+        subject: '🔑 ATFunding SMTP Connection Test',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #1f2937; border-radius: 8px; background-color: #0b0f19; color: #f3f4f6;">
+            <div style="text-align: center; margin-bottom: 24px; border-bottom: 1px solid #1f2937; padding-bottom: 16px;">
+              <h1 style="color: #fbbf24; margin: 0; font-size: 24px;">ATFunding Test</h1>
+            </div>
+            <p style="font-size: 15px; color: #e5e7eb;">Congratulations! If you are reading this, your secure SMTP email system is fully active and delivering emails flawlessly.</p>
+            <p style="font-size: 13px; color: #9ca3af;">Recipient: <strong>${targetEmail}</strong></p>
+          </div>
+        `
+      });
+
+      console.log('[SMTP Test Send] Test email sent successfully:', info.messageId);
+      return res.json({
+        success: true,
+        message: `Test email sent successfully to ${targetEmail}! Message ID: ${info.messageId}`
+      });
+    } catch (err: any) {
+      console.error('[SMTP Test Send] Error sending test email:', err);
+      return res.status(500).json({
+        success: false,
+        error: err.message || 'SMTP Send failed.',
+        details: err.stack || err.toString()
+      });
+    }
   });
 
   // 2. PASSWORD RESET VERIFICATION WITH OTP
