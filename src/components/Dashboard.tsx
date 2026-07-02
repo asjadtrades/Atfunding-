@@ -242,6 +242,12 @@ export default function Dashboard({
               >
                 Logs
               </button>
+              <button
+                onClick={() => setActiveTab('referrals')}
+                className={`px-2 sm:px-3 py-1.5 rounded-lg text-[10px] sm:text-xs font-medium uppercase tracking-wider transition-all cursor-pointer flex-shrink-0 ${activeTab === 'referrals' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'text-gray-400 hover:text-white'}`}
+              >
+                Affiliate
+              </button>
 
             </nav>
           </div>
@@ -1684,6 +1690,7 @@ export default function Dashboard({
                           <thead>
                             <tr className="border-b border-gray-900 text-[10px] text-gray-500 uppercase tracking-wider">
                               <th className="pb-1.5">Challenge</th>
+                              <th className="pb-1.5">Buyer</th>
                               <th className="pb-1.5">Size</th>
                               <th className="pb-1.5 text-right">Price</th>
                               <th className="pb-1.5 text-right">Commission</th>
@@ -1694,6 +1701,7 @@ export default function Dashboard({
                             {myCommissions.map((c, i) => (
                               <tr key={i} className="border-b border-gray-900/35 last:border-0 hover:bg-white/5">
                                 <td className="py-2 text-white font-sans font-medium">{c.challengeName}</td>
+                                <td className="py-2 text-gray-400 text-[10px]">{c.referredUserEmail}</td>
                                 <td className="py-2 text-amber-500 font-bold">${c.challengeSize.toLocaleString()}</td>
                                 <td className="py-2 text-right text-gray-400">${c.purchaseAmount.toFixed(2)}</td>
                                 <td className="py-2 text-right text-emerald-400 font-bold">${c.commissionAmount.toFixed(2)}</td>
