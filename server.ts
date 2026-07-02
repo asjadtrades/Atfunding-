@@ -164,6 +164,42 @@ interface Coupon {
   description: string;
 }
 
+interface AffiliateProfile {
+  userId: string;
+  userEmail: string;
+  userName: string;
+  referralCode: string;
+  clicks: number;
+  createdAt: string;
+}
+
+interface AffiliateCommission {
+  id: string;
+  affiliateUserId: string;
+  referredUserId: string;
+  referredUserEmail: string;
+  orderId: string;
+  challengeName: string;
+  challengeSize: number;
+  purchaseAmount: number;
+  commissionAmount: number;
+  status: 'pending' | 'approved' | 'paid';
+  createdAt: string;
+}
+
+interface AffiliatePayoutRequest {
+  id: string;
+  affiliateUserId: string;
+  userEmail: string;
+  userName: string;
+  amount: number;
+  method: 'bitcoin' | 'usdt' | 'bank';
+  details: string;
+  status: 'pending' | 'approved' | 'rejected' | 'paid';
+  createdAt: string;
+}
+
+
 const DB_PATH = path.join(process.cwd(), 'db.json');
 
 // Default starting values
@@ -305,7 +341,20 @@ let dataStore = {
   ruleViolations: [] as RuleViolation[],
   coupons: [
     { code: 'SAVE30', discountPercent: 30, description: '30% Off on all challenges' }
-  ] as Coupon[]
+  ] as Coupon[],
+  affiliateProfiles: [] as AffiliateProfile[],
+  commissions: [] as AffiliateCommission[],
+  affiliatePayoutRequests: [] as AffiliatePayoutRequest[],
+  challengeCommissions: {
+    'os-5k': 10.00,
+    'os-10k': 20.00,
+    'ts-5k': 7.50,
+    'ts-10k': 15.00,
+    'inst-1k': 1.00,
+    'inst-2k': 2.00,
+    'ppl-5k': 2.50,
+    'ppl-10k': 5.00
+  } as Record<string, number>
 };
 
 // Load database
@@ -321,10 +370,52 @@ function loadDatabase() {
           password: '@Asjad.khan07'
         };
       }
+      if (!dataStore.users || !Array.isArray(dataStore.users)) {
+        dataStore.users = [];
+      }
+      if (!dataStore.accounts || !Array.isArray(dataStore.accounts)) {
+        dataStore.accounts = [];
+      }
+      if (!dataStore.orders || !Array.isArray(dataStore.orders)) {
+        dataStore.orders = [];
+      }
+      if (!dataStore.trades || !Array.isArray(dataStore.trades)) {
+        dataStore.trades = [];
+      }
+      if (!dataStore.accountLogs || !Array.isArray(dataStore.accountLogs)) {
+        dataStore.accountLogs = [];
+      }
+      if (!dataStore.payoutRequests || !Array.isArray(dataStore.payoutRequests)) {
+        dataStore.payoutRequests = [];
+      }
+      if (!dataStore.ruleViolations || !Array.isArray(dataStore.ruleViolations)) {
+        dataStore.ruleViolations = [];
+      }
       if (!dataStore.coupons || !Array.isArray(dataStore.coupons)) {
         dataStore.coupons = [
           { code: 'SAVE30', discountPercent: 30, description: '30% Off on all challenges' }
         ];
+      }
+      if (!dataStore.affiliateProfiles) {
+        dataStore.affiliateProfiles = [];
+      }
+      if (!dataStore.commissions) {
+        dataStore.commissions = [];
+      }
+      if (!dataStore.affiliatePayoutRequests) {
+        dataStore.affiliatePayoutRequests = [];
+      }
+      if (!dataStore.challengeCommissions) {
+        dataStore.challengeCommissions = {
+          'os-5k': 10.00,
+          'os-10k': 20.00,
+          'ts-5k': 7.50,
+          'ts-10k': 15.00,
+          'inst-1k': 1.00,
+          'inst-2k': 2.00,
+          'ppl-5k': 2.50,
+          'ppl-10k': 5.00
+        };
       }
       console.log('Database loaded successfully from file.');
     } catch (e) {
@@ -364,6 +455,15 @@ function loadDatabase() {
     });
     saveDatabase();
   }
+}
+
+// Generate unique account ID
+function generateUniqueAccountId(): string {
+  let accountId = '';
+  do {
+    accountId = `ACC-${Math.floor(100000 + Math.random() * 900000)}`;
+  } while (dataStore.accounts.some(a => a.id === accountId));
+  return accountId;
 }
 
 // Save database
@@ -1372,7 +1472,11 @@ async function startServer() {
       quotes: currentQuotes,
       ruleViolations: dataStore.ruleViolations || [],
       coupons: dataStore.coupons || [],
-      liveDataUnavailable: isMarketDataUnavailable
+      liveDataUnavailable: isMarketDataUnavailable,
+      affiliateProfiles: dataStore.affiliateProfiles || [],
+      commissions: dataStore.commissions || [],
+      affiliatePayoutRequests: dataStore.affiliatePayoutRequests || [],
+      challengeCommissions: dataStore.challengeCommissions || {}
     });
   });
 
@@ -1809,14 +1913,14 @@ async function startServer() {
 
     // If verified successfully, activate evaluation instantly!
     const orderId = `ORD-${Math.floor(100000 + Math.random() * 900000)}`;
-    const accountId = `ACC-${Math.floor(100000 + Math.random() * 900000)}`;
-
     const details = orderDetails || {};
+    const emailToUse = (details.userEmail || '').toLowerCase().trim();
+    const accountId = generateUniqueAccountId();
 
     const newOrder: Order = {
       id: orderId,
       userId: details.userId || `usr-${Math.floor(1000 + Math.random() * 9000)}`,
-      userEmail: details.userEmail || '',
+      userEmail: emailToUse,
       userName: details.userName || 'Trader',
       surname: details.surname || '',
       phoneNumber: details.phoneNumber || '',
@@ -1838,7 +1942,6 @@ async function startServer() {
     };
 
     // Auto register user if new
-    const emailToUse = (details.userEmail || '').toLowerCase().trim();
     const userExists = emailToUse ? dataStore.users.some(u => u.email.toLowerCase() === emailToUse) : false;
     if (!userExists && emailToUse) {
       dataStore.users.push({
@@ -1856,7 +1959,7 @@ async function startServer() {
     const newAccount: Account = {
       id: accountId,
       userId: orderDetails.userId,
-      userEmail: orderDetails.userEmail,
+      userEmail: emailToUse,
       userName: orderDetails.userName,
       challengeConfigId: orderDetails.challengeConfigId,
       challengeName: orderDetails.challengeName,
@@ -1892,9 +1995,12 @@ async function startServer() {
   // FREE ACCOUNT REGISTRATION OR PASS PAY LATER CREATE PENDING
   app.post('/api/orders/create', (req, res) => {
     const rawOrder = req.body.order || req.body || {};
+    const emailToUse = (rawOrder.userEmail || '').toLowerCase().trim();
+    const accountId = generateUniqueAccountId();
+
     const order = {
       userId: rawOrder.userId || `usr-${Math.floor(1000 + Math.random() * 9000)}`,
-      userEmail: rawOrder.userEmail || '',
+      userEmail: emailToUse,
       userName: rawOrder.userName || 'Trader',
       surname: rawOrder.surname || '',
       phoneNumber: rawOrder.phoneNumber || '',
@@ -1913,7 +2019,6 @@ async function startServer() {
       recipientAddress: rawOrder.recipientAddress || ''
     };
 
-    const accountId = `ACC-${Math.floor(100000 + Math.random() * 900000)}`;
     const newOrder: Order = {
       ...order,
       id: rawOrder.id || `ORD-${Math.floor(100000 + Math.random() * 900000)}`,
@@ -1923,7 +2028,6 @@ async function startServer() {
     };
 
     // Auto register if new
-    const emailToUse = order.userEmail.toLowerCase().trim();
     const userExists = emailToUse ? dataStore.users.some(u => u.email.toLowerCase() === emailToUse) : false;
     if (!userExists && emailToUse) {
       dataStore.users.push({
@@ -1940,7 +2044,7 @@ async function startServer() {
     const pendingAccount: Account = {
       id: accountId,
       userId: order.userId,
-      userEmail: order.userEmail,
+      userEmail: emailToUse,
       userName: order.userName,
       challengeConfigId: order.challengeConfigId,
       challengeName: order.challengeName,
@@ -1971,8 +2075,266 @@ async function startServer() {
       timestamp: new Date().toISOString()
     });
 
+    if (newOrder.status === 'approved') {
+      processAffiliateCommission(newOrder);
+    }
+
     saveDatabase();
     res.json({ success: true, order: newOrder, account: pendingAccount });
+  });
+
+  // AFFILIATE PROGRAM SYSTEM UTILITIES & ENDPOINTS
+  function findAffiliateByReferredBy(referredBy: string | undefined): User | null {
+    if (!referredBy) return null;
+    const refLower = referredBy.toLowerCase().trim();
+
+    // 1. Check if matches any referralCode in affiliateProfiles
+    if (dataStore.affiliateProfiles) {
+      const profile = dataStore.affiliateProfiles.find(p => p.referralCode.toLowerCase().trim() === refLower);
+      if (profile) {
+        const u = dataStore.users.find(usr => usr.id === profile.userId);
+        if (u) return u;
+      }
+    }
+
+    // 2. Check if is user email
+    const uByEmail = dataStore.users.find(usr => usr.email.toLowerCase().trim() === refLower);
+    if (uByEmail) return uByEmail;
+
+    // 3. Check if is user ID
+    const uById = dataStore.users.find(usr => usr.id === referredBy);
+    if (uById) return uById;
+
+    return null;
+  }
+
+  function processAffiliateCommission(order: Order) {
+    if (!dataStore.commissions) {
+      dataStore.commissions = [];
+    }
+    const alreadyProcessed = dataStore.commissions.some(c => c.orderId === order.id);
+    if (alreadyProcessed) return;
+
+    const user = dataStore.users.find(u => u.id === order.userId);
+    if (!user || !user.referredBy) return;
+
+    const affiliate = findAffiliateByReferredBy(user.referredBy);
+    if (!affiliate) return;
+
+    // Auto-create affiliate profile if not existing
+    if (!dataStore.affiliateProfiles) {
+      dataStore.affiliateProfiles = [];
+    }
+    let profile = dataStore.affiliateProfiles.find(p => p.userId === affiliate.id);
+    if (!profile) {
+      const code = (affiliate.name || 'REF').replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 8) + Math.floor(10 + Math.random() * 90);
+      profile = {
+        userId: affiliate.id,
+        userEmail: affiliate.email,
+        userName: affiliate.name,
+        referralCode: code,
+        clicks: 0,
+        createdAt: new Date().toISOString()
+      };
+      dataStore.affiliateProfiles.push(profile);
+    }
+
+    // Get commission settings
+    const commissionsMap = dataStore.challengeCommissions || {};
+    let commAmount = commissionsMap[order.challengeConfigId];
+    if (commAmount === undefined) {
+      // Default to 15% of the purchase price
+      commAmount = Math.round((order.finalPrice * 0.15) * 100) / 100;
+    }
+
+    const newComm: AffiliateCommission = {
+      id: `comm-${Math.floor(100000 + Math.random() * 900000)}`,
+      affiliateUserId: affiliate.id,
+      referredUserId: user.id,
+      referredUserEmail: user.email,
+      orderId: order.id,
+      challengeName: order.challengeName,
+      challengeSize: order.challengeSize,
+      purchaseAmount: order.finalPrice,
+      commissionAmount: commAmount,
+      status: 'pending',
+      createdAt: new Date().toISOString()
+    };
+
+    dataStore.commissions.push(newComm);
+  }
+
+  app.post('/api/affiliates/click', (req, res) => {
+    const { referralCode } = req.body;
+    if (!referralCode) return res.status(400).json({ error: 'Referral code is required' });
+
+    if (!dataStore.affiliateProfiles) {
+      dataStore.affiliateProfiles = [];
+    }
+
+    const profile = dataStore.affiliateProfiles.find(p => p.referralCode.toLowerCase().trim() === referralCode.toLowerCase().trim());
+    if (profile) {
+      profile.clicks = (profile.clicks || 0) + 1;
+      saveDatabase();
+      return res.json({ success: true, clicks: profile.clicks });
+    }
+
+    res.json({ success: false, message: 'Referral profile not found' });
+  });
+
+  app.post('/api/affiliates/join', (req, res) => {
+    const { userId, referralCode } = req.body;
+    if (!userId || !referralCode) {
+      return res.status(400).json({ error: 'User ID and referral code are required' });
+    }
+
+    const cleanCode = referralCode.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().trim();
+    if (cleanCode.length < 3) {
+      return res.status(400).json({ error: 'Referral code must be at least 3 alphanumeric characters' });
+    }
+
+    const user = dataStore.users.find(u => u.id === userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (!dataStore.affiliateProfiles) {
+      dataStore.affiliateProfiles = [];
+    }
+
+    const codeTaken = dataStore.affiliateProfiles.some(p => p.referralCode.toUpperCase() === cleanCode && p.userId !== userId);
+    if (codeTaken) {
+      return res.status(400).json({ error: 'This referral code is already taken. Please choose another one.' });
+    }
+
+    let profile = dataStore.affiliateProfiles.find(p => p.userId === userId);
+    if (profile) {
+      profile.referralCode = cleanCode;
+    } else {
+      profile = {
+        userId,
+        userEmail: user.email,
+        userName: user.name,
+        referralCode: cleanCode,
+        clicks: 0,
+        createdAt: new Date().toISOString()
+      };
+      dataStore.affiliateProfiles.push(profile);
+    }
+
+    saveDatabase();
+    res.json({ success: true, profile });
+  });
+
+  app.post('/api/affiliates/payouts', (req, res) => {
+    const { userId, amount, method, details } = req.body;
+    if (!userId || !amount || !method || !details) {
+      return res.status(400).json({ error: 'All fields are required' });
+    }
+
+    const user = dataStore.users.find(u => u.id === userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const numAmount = Number(amount);
+    if (numAmount <= 0) {
+      return res.status(400).json({ error: 'Payout amount must be greater than 0' });
+    }
+
+    // Calculate user's available earnings
+    const userCommissions = (dataStore.commissions || []).filter(c => c.affiliateUserId === userId);
+    const approvedEarnings = userCommissions.filter(c => c.status === 'approved').reduce((sum, c) => sum + c.commissionAmount, 0);
+    
+    const userPayouts = (dataStore.affiliatePayoutRequests || []).filter(p => p.affiliateUserId === userId);
+    const pendingPayouts = userPayouts.filter(p => p.status === 'pending').reduce((sum, p) => sum + p.amount, 0);
+    const paidPayouts = userPayouts.filter(p => p.status === 'paid' || p.status === 'approved').reduce((sum, p) => sum + p.amount, 0);
+
+    const availableToWithdraw = approvedEarnings - pendingPayouts - paidPayouts;
+
+    if (numAmount > availableToWithdraw) {
+      return res.status(400).json({ error: `Insufficient funds. Your available balance to withdraw is $${availableToWithdraw.toFixed(2)}.` });
+    }
+
+    if (!dataStore.affiliatePayoutRequests) {
+      dataStore.affiliatePayoutRequests = [];
+    }
+
+    const newRequest: AffiliatePayoutRequest = {
+      id: `apayout-${Math.floor(100000 + Math.random() * 900000)}`,
+      affiliateUserId: userId,
+      userEmail: user.email,
+      userName: user.name,
+      amount: numAmount,
+      method: method as any,
+      details,
+      status: 'pending',
+      createdAt: new Date().toISOString()
+    };
+
+    dataStore.affiliatePayoutRequests.push(newRequest);
+    saveDatabase();
+
+    res.json({ success: true, request: newRequest });
+  });
+
+  app.post('/api/admin/affiliates/commissions', (req, res) => {
+    const { commissions } = req.body;
+    if (!commissions) {
+      return res.status(400).json({ error: 'Commissions mapping is required.' });
+    }
+    dataStore.challengeCommissions = commissions;
+    saveDatabase();
+    res.json({ success: true, challengeCommissions: dataStore.challengeCommissions });
+  });
+
+  app.post('/api/admin/affiliates/commissions/:id/status', (req, res) => {
+    const { id } = req.params;
+    const { status } = req.body;
+    if (!status || !['pending', 'approved', 'paid'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid commission status' });
+    }
+
+    if (!dataStore.commissions) dataStore.commissions = [];
+    const commission = dataStore.commissions.find(c => c.id === id);
+    if (!commission) return res.status(404).json({ error: 'Commission not found' });
+
+    commission.status = status as any;
+    saveDatabase();
+    res.json({ success: true, commission });
+  });
+
+  app.post('/api/admin/affiliates/payouts/:id/status', (req, res) => {
+    const { id } = req.params;
+    const { status } = req.body;
+    if (!status || !['pending', 'approved', 'rejected', 'paid'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid status' });
+    }
+
+    if (!dataStore.affiliatePayoutRequests) dataStore.affiliatePayoutRequests = [];
+    const payout = dataStore.affiliatePayoutRequests.find(p => p.id === id);
+    if (!payout) return res.status(404).json({ error: 'Payout request not found' });
+
+    payout.status = status as any;
+
+    // If marked as paid, mark the corresponding approved commissions as paid
+    if (status === 'paid') {
+      let amountToSettle = payout.amount;
+      const userComms = (dataStore.commissions || []).filter(c => c.affiliateUserId === payout.affiliateUserId && c.status === 'approved');
+      userComms.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+      for (const comm of userComms) {
+        if (amountToSettle <= 0) break;
+        if (comm.commissionAmount <= amountToSettle) {
+          comm.status = 'paid';
+          amountToSettle -= comm.commissionAmount;
+        } else {
+          comm.status = 'paid';
+          amountToSettle = 0;
+        }
+      }
+    }
+
+    saveDatabase();
+    res.json({ success: true, payout });
   });
 
   // COUPONS WORKFLOW API
@@ -2029,6 +2391,8 @@ async function startServer() {
       type: 'success',
       timestamp: new Date().toISOString()
     });
+
+    processAffiliateCommission(order);
 
     saveDatabase();
     res.json({ success: true });
@@ -2184,6 +2548,99 @@ async function startServer() {
 
     saveDatabase();
     res.json({ success: true });
+  });
+
+  // Admin Giveaway Account Creation
+  app.post('/api/admin/giveaway', (req, res) => {
+    const { email, challengeConfigId, name } = req.body;
+    if (!email || !challengeConfigId) {
+      return res.status(400).json({ error: 'Email and Challenge Config are required.' });
+    }
+
+    const cleanEmail = email.toLowerCase().trim();
+    const config = CHALLENGES.find(c => c.id === challengeConfigId);
+    if (!config) {
+      return res.status(400).json({ error: 'Selected Challenge Config not found.' });
+    }
+
+    // Generate unique account ID
+    const accountId = generateUniqueAccountId();
+
+    // Ensure user exists
+    let user = dataStore.users.find(u => u.email.toLowerCase().trim() === cleanEmail);
+    if (!user) {
+      user = {
+        id: `usr-${Math.floor(100000 + Math.random() * 900000)}`,
+        email: cleanEmail,
+        name: name || 'Giveaway Trader',
+        password: '123456', // Default simple password for new giveaway users
+        role: 'user',
+        kycStatus: 'none',
+        createdAt: new Date().toISOString()
+      };
+      dataStore.users.push(user);
+    }
+
+    // Create the active giveaway account
+    const giveawayAccount: Account = {
+      id: accountId,
+      userId: user.id,
+      userEmail: cleanEmail,
+      userName: user.name,
+      challengeConfigId: config.id,
+      challengeName: config.name,
+      challengeSize: config.size,
+      type: config.type,
+      status: 'active', // Activated instantly
+      phase: config.type === 'instant' ? 'funded' : 'phase1',
+      balance: config.size,
+      initialBalance: config.size,
+      peakBalance: config.size,
+      startOfDayBalance: config.size,
+      dailyDrawdownLimitValue: config.size * (config.dailyDrawdownLimitPercent / 100),
+      maxDrawdownLimitValue: config.size * (config.maxDrawdownLimitPercent / 100),
+      payoutSharePercent: config.payoutSharePercent,
+      createdAt: new Date().toISOString(),
+      warningsCount: 0
+    };
+
+    // Create an approved order for bookkeeping
+    const orderId = `ORD-${Math.floor(100000 + Math.random() * 900000)}`;
+    const giveawayOrder: Order = {
+      id: orderId,
+      userId: user.id,
+      userEmail: cleanEmail,
+      userName: user.name,
+      surname: 'Giveaway',
+      phoneNumber: 'N/A',
+      city: 'N/A',
+      zipCode: 'N/A',
+      country: 'N/A',
+      challengeConfigId: config.id,
+      challengeName: config.name,
+      challengeSize: config.size,
+      amount: 0,
+      couponUsed: 'GIVEAWAY',
+      discount: config.price,
+      finalPrice: 0,
+      status: 'approved',
+      transactionId: 'GIVEAWAY',
+      accountId: accountId,
+      createdAt: new Date().toISOString()
+    };
+
+    dataStore.orders.unshift(giveawayOrder);
+    dataStore.accounts.unshift(giveawayAccount);
+    dataStore.accountLogs.push({
+      id: `log-${Date.now()}`,
+      accountId,
+      message: `🎉 Giveaway account successfully granted and activated by administrator! Size: $${config.size.toLocaleString()}`,
+      type: 'success',
+      timestamp: new Date().toISOString()
+    });
+
+    saveDatabase();
+    res.json({ success: true, account: giveawayAccount, order: giveawayOrder });
   });
 
   // User updates

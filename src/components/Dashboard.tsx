@@ -5,7 +5,7 @@ import {
   HelpCircle, Eye, EyeOff, LayoutDashboard, Terminal, Check, X,
   ShieldAlert, Clock, Sparkles
 } from 'lucide-react';
-import { User, Account, KycStatus, AccountLog, PayoutRequest, Trade } from '../types';
+import { User, Account, KycStatus, AccountLog, PayoutRequest, Trade, AffiliateProfile, AffiliateCommission, AffiliatePayoutRequest } from '../types';
 
 interface DashboardProps {
   currentUser: User;
@@ -21,6 +21,11 @@ interface DashboardProps {
   onCreatePayoutRequest: (req: PayoutRequest) => void;
   trades: Trade[];
   initialTab?: 'accounts' | 'leaderboard' | 'kyc' | 'logs' | 'referrals';
+  affiliateProfiles?: AffiliateProfile[];
+  commissions?: AffiliateCommission[];
+  affiliatePayoutRequests?: AffiliatePayoutRequest[];
+  challengeCommissions?: Record<string, number>;
+  users?: User[];
 }
 
 export default function Dashboard({
@@ -36,7 +41,12 @@ export default function Dashboard({
   payoutRequests,
   onCreatePayoutRequest,
   trades,
-  initialTab
+  initialTab,
+  affiliateProfiles = [],
+  commissions = [],
+  affiliatePayoutRequests = [],
+  challengeCommissions = {},
+  users = []
 }: DashboardProps) {
   const [activeTab, setActiveTab] = useState<'accounts' | 'leaderboard' | 'kyc' | 'logs' | 'referrals'>(initialTab || 'accounts');
 
@@ -55,6 +65,19 @@ export default function Dashboard({
 
   // KYC Wizard States
   const [kycStep, setKycStep] = useState<'front' | 'front_scanning' | 'front_choice' | 'back' | 'back_scanning' | 'back_choice' | 'face' | 'face_scanning' | 'face_choice'>('front');
+
+  // Affiliate State Hooks
+  const [copied, setCopied] = useState(false);
+  const [joinCode, setJoinCode] = useState(() => (currentUser.name || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 8) + Math.floor(10 + Math.random() * 90));
+  const [joinError, setJoinError] = useState('');
+  const [joinSuccess, setJoinSuccess] = useState('');
+  const [affPayoutAmount, setAffPayoutAmount] = useState('');
+  const [affPayoutMethod, setAffPayoutMethod] = useState<'bitcoin' | 'usdt' | 'bank'>('usdt');
+  const [affPayoutDetails, setAffPayoutDetails] = useState('');
+  const [affPayoutError, setAffPayoutError] = useState('');
+  const [affPayoutSuccess, setAffPayoutSuccess] = useState('');
+  const [submittingJoin, setSubmittingJoin] = useState(false);
+  const [submittingPayout, setSubmittingPayout] = useState(false);
   const [countdown, setCountdown] = useState(5);
   const [kycDocQuality, setKycDocQuality] = useState<'valid' | 'invalid'>('valid');
   const [kycBackQuality, setKycBackQuality] = useState<'valid' | 'invalid'>('valid');
@@ -95,14 +118,6 @@ export default function Dashboard({
   const [payoutMethod, setPayoutMethod] = useState<'bitcoin' | 'usdt'>('bitcoin');
   const [payoutDetails, setPayoutDetails] = useState('');
   const [walletInput, setWalletInput] = useState('');
-
-  // Referral states
-  const [copied, setCopied] = useState(false);
-  const [refPayoutAmount, setRefPayoutAmount] = useState('50');
-  const [refPayoutMethod, setRefPayoutMethod] = useState<'bitcoin' | 'usdt'>('bitcoin');
-  const [refPayoutAddress, setRefPayoutAddress] = useState(currentUser.payoutWalletAddress || '');
-  const [refPayoutSuccess, setRefPayoutSuccess] = useState('');
-  const [refPayoutError, setRefPayoutError] = useState('');
 
   // Auto-populate payoutDetails if crypto is chosen and user has a saved payout address
   React.useEffect(() => {
@@ -177,7 +192,11 @@ export default function Dashboard({
     setActiveTab('accounts');
   };
 
-  const myAccounts = accounts.filter(acc => acc.userEmail === currentUser.email);
+  const myAccounts = accounts.filter(acc => 
+    acc.userEmail && 
+    currentUser && 
+    acc.userEmail.toLowerCase().trim() === currentUser.email.toLowerCase().trim()
+  );
 
   return (
     <div className="min-h-screen bg-[#05070B] text-gray-100 font-sans pb-20">
@@ -628,7 +647,7 @@ export default function Dashboard({
                           const rank = index + 1;
                           const displayProfit = acc.profit.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
                           const displayPercent = acc.profitPercent.toFixed(2) + '%';
-                          const isCurrentUserAcc = acc.userEmail === currentUser.email;
+                          const isCurrentUserAcc = acc.userEmail && currentUser && acc.userEmail.toLowerCase().trim() === currentUser.email.toLowerCase().trim();
 
                           // Format name slightly for privacy
                           const parts = acc.userName.split(' ');
@@ -1318,93 +1337,192 @@ export default function Dashboard({
         )}
 
         {activeTab === 'referrals' && (() => {
-          return (
-            <div className="bg-[#0D1017] border border-gray-800 rounded-2xl p-6 text-center text-gray-400">
-              Referral Program is currently disabled.
-            </div>
-          );
-          const referralUrl = `${window.location.origin}/?ref=${currentUser.id}`;
+          const myProfile = affiliateProfiles.find(p => p.userId === currentUser.id);
+          const referralUrl = myProfile ? `${window.location.origin}/?ref=${myProfile.referralCode}` : '';
+
+          const myReferrals = myProfile ? users.filter(u => u.referredBy && (
+            u.referredBy.toLowerCase() === myProfile.referralCode.toLowerCase() ||
+            u.referredBy.toLowerCase() === currentUser.id.toLowerCase() ||
+            u.referredBy.toLowerCase() === currentUser.email.toLowerCase()
+          )) : [];
+
+          const myCommissions = commissions.filter(c => c.affiliateUserId === currentUser.id);
+          const myPayoutRequests = affiliatePayoutRequests.filter(p => p.affiliateUserId === currentUser.id);
+
+          // Calculations
+          const approvedEarnings = myCommissions.filter(c => c.status === 'approved').reduce((sum, c) => sum + c.commissionAmount, 0);
+          const pendingEarnings = myCommissions.filter(c => c.status === 'pending').reduce((sum, c) => sum + c.commissionAmount, 0);
+          const paidEarnings = myCommissions.filter(c => c.status === 'paid').reduce((sum, c) => sum + c.commissionAmount, 0);
+
+          const pendingPayouts = myPayoutRequests.filter(p => p.status === 'pending').reduce((sum, p) => sum + p.amount, 0);
+          const approvedPayouts = myPayoutRequests.filter(p => p.status === 'paid' || p.status === 'approved').reduce((sum, p) => sum + p.amount, 0);
+
+          const availableToWithdraw = Math.max(0, approvedEarnings - pendingPayouts - approvedPayouts);
+          const totalCommissionEarned = approvedEarnings + pendingEarnings + paidEarnings;
 
           const handleCopyLink = () => {
+            if (!referralUrl) return;
             navigator.clipboard.writeText(referralUrl);
             setCopied(true);
             setTimeout(() => setCopied(false), 2000);
           };
 
-          const handleRefPayoutSubmit = (e: React.FormEvent) => {
+          const handleJoinAffiliateSubmit = async (e: React.FormEvent) => {
             e.preventDefault();
-            setRefPayoutError('');
-            setRefPayoutSuccess('');
+            setJoinError('');
+            setJoinSuccess('');
+            setSubmittingJoin(true);
+            try {
+              const res = await fetch('/api/affiliates/join', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userId: currentUser.id, referralCode: joinCode })
+              });
+              const data = await res.json();
+              if (!res.ok) {
+                setJoinError(data.error || 'Failed to activate affiliate program.');
+              } else {
+                setJoinSuccess('Affiliate Partner Dashboard activated successfully!');
+                onRefreshData();
+              }
+            } catch (err) {
+              setJoinError('Server connection error. Please try again.');
+            } finally {
+              setSubmittingJoin(false);
+            }
+          };
 
-            const amount = parseFloat(refPayoutAmount) || 0;
+          const handleRefPayoutSubmit = async (e: React.FormEvent) => {
+            e.preventDefault();
+            setAffPayoutError('');
+            setAffPayoutSuccess('');
+
+            const amount = parseFloat(affPayoutAmount) || 0;
             if (amount < 25) {
-              setRefPayoutError('Minimum commission payout is $25.');
+              setAffPayoutError('Minimum commission payout limit is $25.');
               return;
             }
-            if (amount > 100) {
-              setRefPayoutError('Maximum commission payout limit is $100 per transaction.');
+            if (amount > availableToWithdraw) {
+              setAffPayoutError(`Insufficient approved funds. Max available to withdraw is $${availableToWithdraw.toFixed(2)}.`);
               return;
             }
-            if (!refPayoutAddress) {
-              setRefPayoutError('Please provide a secure payout address.');
+            if (!affPayoutDetails.trim()) {
+              setAffPayoutError('Please specify secure payout address or bank coordinates.');
               return;
             }
 
-            setRefPayoutSuccess(`Payout request for $${amount.toFixed(2)} in ${refPayoutMethod.toUpperCase()} submitted successfully! Audit pending.`);
+            setSubmittingPayout(true);
+            try {
+              const res = await fetch('/api/affiliates/payouts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  userId: currentUser.id,
+                  amount,
+                  method: affPayoutMethod,
+                  details: affPayoutDetails
+                })
+              });
+              const data = await res.json();
+              if (!res.ok) {
+                setAffPayoutError(data.error || 'Failed to submit payout request.');
+              } else {
+                setAffPayoutSuccess(`Payout request for $${amount.toFixed(2)} submitted successfully!`);
+                setAffPayoutAmount('');
+                setAffPayoutDetails('');
+                onRefreshData();
+              }
+            } catch (err) {
+              setAffPayoutError('Server connection error. Please try again.');
+            } finally {
+              setSubmittingPayout(false);
+            }
           };
 
-          const otherAccounts = accounts.filter(a => a.userId !== currentUser.id && a.userEmail !== currentUser.email);
+          if (!myProfile) {
+            return (
+              <div className="max-w-xl mx-auto bg-[#0D1017] border border-gray-800 rounded-2xl p-8 space-y-6 text-left">
+                <div className="text-center space-y-2">
+                  <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-amber-500/10 text-amber-500 mb-2">
+                    <Sparkles className="w-6 h-6" />
+                  </div>
+                  <h2 className="text-xl font-bold text-white">Join the ATFunding Affiliate Program</h2>
+                  <p className="text-sm text-gray-400">
+                    Earn lucrative commissions on every user who signs up and buys a challenge using your custom referral link.
+                  </p>
+                </div>
 
-          const getChallengePrice = (size: number) => {
-            if (size <= 1000) return 0;
-            if (size <= 5000) return 49;
-            if (size <= 10000) return 99;
-            if (size <= 25000) return 189;
-            if (size <= 50000) return 299;
-            if (size <= 100000) return 499;
-            return 899;
-          };
+                <div className="bg-[#111622] rounded-xl p-4 border border-gray-800 text-xs text-gray-400 space-y-2">
+                  <p className="font-semibold text-white">Program Highlights:</p>
+                  <ul className="list-disc pl-4 space-y-1">
+                    <li>Customize your referral code (e.g. TRADERPRO)</li>
+                    <li>Earn commissions defined per challenge dynamically</li>
+                    <li>Withdraw directly in Bitcoin (BTC), USDT (TRC-20), or Bank Transfer</li>
+                    <li>Track real-time click rates, registrations, and approved payouts</li>
+                  </ul>
+                </div>
 
-          const realReferrals = otherAccounts.map(acc => {
-            const price = getChallengePrice(acc.challengeSize);
-            const comm = price * 0.15;
-            return {
-              id: acc.id,
-              name: acc.userName || acc.userEmail.split('@')[0],
-              email: acc.userEmail,
-              date: new Date(acc.createdAt).toLocaleDateString(),
-              size: acc.challengeSize,
-              commission: comm,
-              status: acc.status === 'active' ? 'Approved' : 'Pending Payment'
-            };
-          });
+                {joinError && (
+                  <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-lg text-xs">
+                    {joinError}
+                  </div>
+                )}
+                {joinSuccess && (
+                  <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 p-3 rounded-lg text-xs">
+                    {joinSuccess}
+                  </div>
+                )}
 
-          const fallbackReferrals = [
-            { id: 'ref-9021', name: 'Kabir Dev', email: 'kabir.dev99@gmail.com', date: '2 days ago', size: 10000, commission: 14.85, status: 'Approved' },
-            { id: 'ref-1830', name: 'Rohit Sharma', email: 'rohit.trade07@gmail.com', date: '5 days ago', size: 50000, commission: 44.85, status: 'Approved' }
-          ];
+                <form onSubmit={handleJoinAffiliateSubmit} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-mono uppercase tracking-wider text-gray-400 mb-1.5">
+                      Choose Your Custom Referral Code:
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={joinCode}
+                      onChange={(e) => setJoinCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+                      placeholder="e.g. GOLDENTRADER"
+                      className="w-full bg-[#07090E] border border-gray-800 rounded-lg py-2.5 px-4 text-sm text-amber-500 font-mono focus:outline-none focus:border-amber-500"
+                    />
+                    <p className="text-[10px] text-gray-500 mt-1 font-mono">Only alphanumeric capital letters are allowed. Min 3 chars.</p>
+                  </div>
 
-          const displayReferrals = realReferrals.length > 0 ? [...realReferrals, ...fallbackReferrals] : fallbackReferrals;
-
-          const totalEarned = displayReferrals.reduce((sum, r) => sum + (r.status === 'Approved' ? r.commission : 0), 0);
-          const outstandingComm = totalEarned;
+                  <button
+                    type="submit"
+                    disabled={submittingJoin || joinCode.length < 3}
+                    className="w-full py-3 rounded-lg bg-gradient-to-r from-amber-500 to-yellow-600 text-black font-bold text-xs uppercase tracking-wider transition-all cursor-pointer hover:brightness-110 disabled:opacity-50"
+                  >
+                    {submittingJoin ? 'Registering...' : 'Activate Affiliate Account'}
+                  </button>
+                </form>
+              </div>
+            );
+          }
 
           return (
             <div className="bg-[#0D1017] border border-gray-800 rounded-2xl p-6 space-y-6">
-              <div className="flex justify-between items-start border-b border-gray-800 pb-4">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-gray-800 pb-4 gap-4 text-left">
                 <div>
                   <h2 className="text-xl font-bold text-white flex items-center gap-2">
                     <Sparkles className="w-5 h-5 text-amber-500" />
-                    <span>Institutional Affiliate & Referral Program</span>
+                    <span>Affiliate Partner Dashboard</span>
                   </h2>
-                  <p className="text-xs text-gray-400">Earn a flat 15% commission on every challenge purchased via your referral link.</p>
+                  <p className="text-xs text-gray-400">Manage referral links, live tracking parameters, and commission payout metrics.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-500 font-mono">Partner Status:</span>
+                  <span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider">
+                    Official Affiliate
+                  </span>
                 </div>
               </div>
 
-              {/* Referral link copy widget */}
-              <div className="bg-[#111622] border border-gray-800 rounded-xl p-5 space-y-3">
+              {/* Referral Copy Box */}
+              <div className="bg-[#111622] border border-gray-800 rounded-xl p-5 space-y-3 text-left">
                 <label className="block text-xs font-mono uppercase tracking-wider text-amber-500 font-bold">
-                  Your High-Converting Referral Link:
+                  Your Custom Referral Link:
                 </label>
                 <div className="flex gap-2">
                   <input
@@ -1417,66 +1535,69 @@ export default function Dashboard({
                     onClick={handleCopyLink}
                     className="bg-amber-500 hover:bg-amber-600 text-black px-5 py-2.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer"
                   >
-                    {copied ? <Check className="w-4 h-4" /> : <ArrowUpRight className="w-4 h-4" />}
+                    {copied ? <CheckCircle2 className="w-4 h-4" /> : <ArrowUpRight className="w-4 h-4" />}
                     <span>{copied ? 'Copied!' : 'Copy Link'}</span>
                   </button>
                 </div>
-                <p className="text-[10px] text-gray-500 leading-tight">
-                  Share this link with other traders. When they sign up and acquire an evaluation account, you automatically earn 15% of the purchase value hamesha ke liye (permanently).
+                <p className="text-[10px] text-gray-500 font-mono">
+                  Referral code: <span className="text-amber-500 font-bold">{myProfile.referralCode}</span>
                 </p>
               </div>
 
-              {/* Stats row */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-[#111622]/50 border border-gray-900 rounded-xl p-4 text-left">
-                  <p className="text-gray-500 uppercase font-mono text-[10px] tracking-wider">Total Referred Registrations</p>
-                  <p className="text-2xl font-bold text-white mt-1">{displayReferrals.length}</p>
-                  <p className="text-[10px] text-gray-600 mt-1">Real-time unique registrations</p>
+              {/* Stats Grid */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 text-left">
+                <div className="bg-[#111622]/50 border border-gray-900 rounded-xl p-4">
+                  <p className="text-gray-500 uppercase font-mono text-[9px] tracking-wider">Link Clicks</p>
+                  <p className="text-2xl font-bold text-white mt-1">{myProfile.clicks || 0}</p>
+                  <p className="text-[10px] text-gray-600 mt-1">Unique visitor clicks</p>
                 </div>
-                <div className="bg-[#111622]/50 border border-gray-900 rounded-xl p-4 text-left">
-                  <p className="text-gray-500 uppercase font-mono text-[10px] tracking-wider">Total Commissions Earned</p>
-                  <p className="text-2xl font-bold text-emerald-400 mt-1">${totalEarned.toFixed(2)}</p>
-                  <p className="text-[10px] text-gray-600 mt-1">Based on a 15% flat payout rate</p>
+                <div className="bg-[#111622]/50 border border-gray-900 rounded-xl p-4">
+                  <p className="text-gray-500 uppercase font-mono text-[9px] tracking-wider">Registrations</p>
+                  <p className="text-2xl font-bold text-sky-400 mt-1">{myReferrals.length}</p>
+                  <p className="text-[10px] text-gray-600 mt-1">Total referred signups</p>
                 </div>
-                <div className="bg-[#111622]/50 border border-gray-900 rounded-xl p-4 text-left">
-                  <p className="text-gray-500 uppercase font-mono text-[10px] tracking-wider">Outstanding Commission Balance</p>
-                  <p className="text-2xl font-bold text-amber-500 mt-1">${outstandingComm.toFixed(2)}</p>
-                  <p className="text-[10px] text-gray-600 mt-1">Available for crypto withdrawal</p>
+                <div className="bg-[#111622]/50 border border-gray-900 rounded-xl p-4">
+                  <p className="text-gray-500 uppercase font-mono text-[9px] tracking-wider">Pending Commissions</p>
+                  <p className="text-2xl font-bold text-amber-500 mt-1">${pendingEarnings.toFixed(2)}</p>
+                  <p className="text-[10px] text-gray-600 mt-1">Awaiting order audit</p>
+                </div>
+                <div className="bg-[#111622]/50 border border-gray-900 rounded-xl p-4">
+                  <p className="text-gray-500 uppercase font-mono text-[9px] tracking-wider">Available For Payout</p>
+                  <p className="text-2xl font-bold text-emerald-400 mt-1">${availableToWithdraw.toFixed(2)}</p>
+                  <p className="text-[10px] text-gray-600 mt-1">Approved, unsettled earnings</p>
                 </div>
               </div>
 
-              {/* Action layout */}
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                
-                {/* 1. Request payout of commissions */}
+                {/* Withdrawal Form */}
                 <div className="lg:col-span-5 bg-[#111622]/30 border border-gray-900 rounded-xl p-5 space-y-4 text-left">
                   <div>
                     <h4 className="text-sm font-bold text-white">Withdraw Commissions</h4>
-                    <p className="text-[11px] text-gray-500">Payout limit: $25 to $100 per transaction (USDT or Bitcoin only).</p>
+                    <p className="text-[11px] text-gray-500">Submit requests in USDT, Bitcoin, or Bank details. Min payout: $25.</p>
                   </div>
 
-                  {refPayoutSuccess && (
-                    <div className="bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 text-xs p-3 rounded-lg">
-                      {refPayoutSuccess}
+                  {affPayoutSuccess && (
+                    <div className="bg-[#10B981]/10 border border-[#10B981]/20 text-[#10B981] text-xs p-3 rounded-lg">
+                      {affPayoutSuccess}
+                    </div>
+                  )}
+                  {affPayoutError && (
+                    <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-xs p-3 rounded-lg">
+                      {affPayoutError}
                     </div>
                   )}
 
-                  {refPayoutError && (
-                    <div className="bg-red-500/10 border border-red-500/25 text-red-400 text-xs p-3 rounded-lg">
-                      {refPayoutError}
-                    </div>
-                  )}
-
-                  <form onSubmit={handleRefPayoutSubmit} className="space-y-3.5">
+                  <form onSubmit={handleRefPayoutSubmit} className="space-y-4">
                     <div>
-                      <label className="block text-[10px] font-mono uppercase tracking-wider text-gray-400 mb-1">Crypto Asset</label>
+                      <label className="block text-[10px] font-mono uppercase tracking-wider text-gray-400 mb-1">Payment Method</label>
                       <select
-                        value={refPayoutMethod}
-                        onChange={(e) => setRefPayoutMethod(e.target.value as any)}
-                        className="w-full bg-[#07090E] border border-gray-850 rounded-lg py-2 px-3 text-xs text-white focus:outline-none focus:border-amber-500"
+                        value={affPayoutMethod}
+                        onChange={(e) => setAffPayoutMethod(e.target.value as any)}
+                        className="w-full bg-[#07090E] border border-gray-800 rounded-lg py-2 px-3 text-xs text-white focus:outline-none focus:border-amber-500"
                       >
+                        <option value="usdt">USDT (TRC-20)</option>
                         <option value="bitcoin">Bitcoin (BTC)</option>
-                        <option value="usdt">USDT TRC-20</option>
+                        <option value="bank">Bank Wire Transfer</option>
                       </select>
                     </div>
 
@@ -1486,78 +1607,154 @@ export default function Dashboard({
                         type="number"
                         step="0.01"
                         required
-                        value={refPayoutAmount}
-                        onChange={(e) => setRefPayoutAmount(e.target.value)}
-                        placeholder="Min $25, Max $100"
-                        className="w-full bg-[#07090E] border border-gray-850 rounded-lg py-2 px-3 text-xs text-white focus:outline-none focus:border-amber-500 font-mono"
+                        value={affPayoutAmount}
+                        onChange={(e) => setAffPayoutAmount(e.target.value)}
+                        placeholder="Minimum $25"
+                        className="w-full bg-[#07090E] border border-gray-800 rounded-lg py-2 px-3 text-xs text-white focus:outline-none focus:border-amber-500 font-mono"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-[10px] font-mono uppercase tracking-wider text-gray-400 mb-1">Secure Wallet Address</label>
-                      <input
-                        type="text"
+                      <label className="block text-[10px] font-mono uppercase tracking-wider text-gray-400 mb-1">
+                        {affPayoutMethod === 'bank' ? 'Bank Routing, Account, & Name Details' : 'Secure Wallet Address'}
+                      </label>
+                      <textarea
+                        rows={2}
                         required
-                        value={refPayoutAddress}
-                        onChange={(e) => setRefPayoutAddress(e.target.value)}
-                        placeholder="Enter your crypto address"
-                        className="w-full bg-[#07090E] border border-gray-850 rounded-lg py-2 px-3 text-xs text-white focus:outline-none focus:border-amber-500 font-mono"
+                        value={affPayoutDetails}
+                        onChange={(e) => setAffPayoutDetails(e.target.value)}
+                        placeholder={affPayoutMethod === 'bank' ? 'Bank Name:\nIBAN:\nSWIFT/BIC:\nAccount Holder:' : 'Paste your crypto wallet address'}
+                        className="w-full bg-[#07090E] border border-gray-800 rounded-lg py-2 px-3 text-xs text-white focus:outline-none focus:border-amber-500 font-mono"
                       />
                     </div>
 
                     <button
                       type="submit"
-                      disabled={outstandingComm < 25}
+                      disabled={submittingPayout || availableToWithdraw < 25}
                       className={`w-full py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all cursor-pointer ${
-                        outstandingComm >= 25 
-                          ? 'bg-gradient-to-r from-amber-500 to-yellow-600 text-black shadow-lg shadow-amber-500/10 hover:brightness-110' 
+                        availableToWithdraw >= 25
+                          ? 'bg-gradient-to-r from-amber-500 to-yellow-600 text-black shadow-lg shadow-amber-500/10 hover:brightness-110'
                           : 'bg-gray-900 text-gray-600 cursor-not-allowed border border-gray-950'
                       }`}
                     >
-                      {outstandingComm >= 25 ? 'Submit Commission Payout' : 'Minimum $25 Balance Required'}
+                      {submittingPayout ? 'Submitting...' : availableToWithdraw >= 25 ? 'Request Commission Payout' : 'Min $25 Balance Required'}
                     </button>
                   </form>
                 </div>
 
-                {/* 2. Referral listing table */}
-                <div className="lg:col-span-7 bg-[#111622]/30 border border-gray-900 rounded-xl p-5 space-y-4">
-                  <div className="text-left">
-                    <h4 className="text-sm font-bold text-white">Referred Accounts List</h4>
-                    <p className="text-[11px] text-gray-500">History of unique signups and challenge purchases under your link.</p>
+                {/* Performance history lists */}
+                <div className="lg:col-span-7 space-y-6 text-left">
+                  {/* Referred Signups */}
+                  <div className="bg-[#111622]/30 border border-gray-900 rounded-xl p-5 space-y-3">
+                    <h4 className="text-sm font-bold text-white">Referred Registrations ({myReferrals.length})</h4>
+                    <div className="overflow-y-auto max-h-[160px] text-xs font-mono">
+                      {myReferrals.length === 0 ? (
+                        <p className="text-gray-500 text-center py-4 font-sans text-xs">No signups recorded under your referral code yet.</p>
+                      ) : (
+                        <table className="w-full text-left">
+                          <thead>
+                            <tr className="border-b border-gray-900 text-[10px] text-gray-500 uppercase tracking-wider">
+                              <th className="pb-1.5">User</th>
+                              <th className="pb-1.5">Email</th>
+                              <th className="pb-1.5 text-right">Joined</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {myReferrals.map((u, i) => (
+                              <tr key={i} className="border-b border-gray-900/35 last:border-0 hover:bg-white/5">
+                                <td className="py-2 text-white font-sans font-medium">{u.name}</td>
+                                <td className="py-2 text-gray-400">{u.email}</td>
+                                <td className="py-2 text-right text-gray-500">{new Date(u.createdAt || '').toLocaleDateString()}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
                   </div>
 
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs font-mono">
-                      <thead>
-                        <tr className="border-b border-gray-900 text-[10px] text-gray-500 uppercase tracking-wider">
-                          <th className="pb-2.5 text-left">Trader</th>
-                          <th className="pb-2.5 text-left">Joined</th>
-                          <th className="pb-2.5 text-left">Evaluation Size</th>
-                          <th className="pb-2.5 text-right">Commission</th>
-                          <th className="pb-2.5 text-right">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-900/60">
-                        {displayReferrals.map((ref, idx) => (
-                          <tr key={idx} className="hover:bg-white/5 transition-colors">
-                            <td className="py-2.5 text-left font-sans font-medium text-white">{ref.name}</td>
-                            <td className="py-2.5 text-left text-gray-400">{ref.date}</td>
-                            <td className="py-2.5 text-left text-amber-500 font-bold">${ref.size.toLocaleString()}</td>
-                            <td className="py-2.5 text-right text-emerald-400 font-bold">${ref.commission.toFixed(2)}</td>
-                            <td className="py-2.5 text-right">
-                              <span className={`inline-block px-1.5 py-0.5 rounded text-[9px] font-sans font-semibold uppercase ${
-                                ref.status === 'Approved' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'
-                              }`}>
-                                {ref.status}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                  {/* Commissions sales list */}
+                  <div className="bg-[#111622]/30 border border-gray-900 rounded-xl p-5 space-y-3">
+                    <h4 className="text-sm font-bold text-white">Sales & Earnings History ({myCommissions.length})</h4>
+                    <div className="overflow-y-auto max-h-[180px] text-xs font-mono">
+                      {myCommissions.length === 0 ? (
+                        <p className="text-gray-500 text-center py-4 font-sans text-xs">No commission rewards registered yet.</p>
+                      ) : (
+                        <table className="w-full text-left">
+                          <thead>
+                            <tr className="border-b border-gray-900 text-[10px] text-gray-500 uppercase tracking-wider">
+                              <th className="pb-1.5">Challenge</th>
+                              <th className="pb-1.5">Size</th>
+                              <th className="pb-1.5 text-right">Price</th>
+                              <th className="pb-1.5 text-right">Commission</th>
+                              <th className="pb-1.5 text-right">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {myCommissions.map((c, i) => (
+                              <tr key={i} className="border-b border-gray-900/35 last:border-0 hover:bg-white/5">
+                                <td className="py-2 text-white font-sans font-medium">{c.challengeName}</td>
+                                <td className="py-2 text-amber-500 font-bold">${c.challengeSize.toLocaleString()}</td>
+                                <td className="py-2 text-right text-gray-400">${c.purchaseAmount.toFixed(2)}</td>
+                                <td className="py-2 text-right text-emerald-400 font-bold">${c.commissionAmount.toFixed(2)}</td>
+                                <td className="py-2 text-right">
+                                  <span className={`inline-block px-1.5 py-0.5 rounded text-[9px] font-sans font-semibold uppercase ${
+                                    c.status === 'paid' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/15' :
+                                    c.status === 'approved' ? 'bg-sky-500/10 text-sky-400 border border-sky-500/15' :
+                                    'bg-amber-500/10 text-amber-400 border border-amber-500/15'
+                                  }`}>
+                                    {c.status}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
                   </div>
+
+                  {/* Affiliate Payout requests */}
+                  <div className="bg-[#111622]/30 border border-gray-900 rounded-xl p-5 space-y-3">
+                    <h4 className="text-sm font-bold text-white">Payout Requests History ({myPayoutRequests.length})</h4>
+                    <div className="overflow-y-auto max-h-[160px] text-xs font-mono">
+                      {myPayoutRequests.length === 0 ? (
+                        <p className="text-gray-500 text-center py-4 font-sans text-xs">No withdrawal history recorded.</p>
+                      ) : (
+                        <table className="w-full text-left">
+                          <thead>
+                            <tr className="border-b border-gray-900 text-[10px] text-gray-500 uppercase tracking-wider">
+                              <th className="pb-1.5">Request ID</th>
+                              <th className="pb-1.5">Method</th>
+                              <th className="pb-1.5 text-right">Amount</th>
+                              <th className="pb-1.5 text-right">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {myPayoutRequests.map((p, i) => (
+                              <tr key={i} className="border-b border-gray-900/35 last:border-0 hover:bg-white/5">
+                                <td className="py-2 text-gray-400 font-mono text-[10px]">{p.id}</td>
+                                <td className="py-2 text-white font-sans uppercase text-[10px]">{p.method}</td>
+                                <td className="py-2 text-right text-amber-400 font-bold">${p.amount.toFixed(2)}</td>
+                                <td className="py-2 text-right">
+                                  <span className={`inline-block px-1.5 py-0.5 rounded text-[9px] font-sans font-semibold uppercase ${
+                                    p.status === 'paid' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/15' :
+                                    p.status === 'approved' ? 'bg-sky-500/10 text-sky-400 border border-sky-500/15' :
+                                    p.status === 'rejected' ? 'bg-red-500/10 text-red-400 border border-red-500/15' :
+                                    'bg-amber-500/10 text-amber-400 border border-amber-500/15'
+                                  }`}>
+                                    {p.status}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  </div>
+
                 </div>
-
               </div>
             </div>
           );

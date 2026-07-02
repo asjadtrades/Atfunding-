@@ -191,4 +191,40 @@ export interface SymbolSettings {
   spread: number;
 }
 
+export interface AffiliateProfile {
+  userId: string;
+  userEmail: string;
+  userName: string;
+  referralCode: string;
+  clicks: number;
+  createdAt: string;
+}
+
+export interface AffiliateCommission {
+  id: string;
+  affiliateUserId: string;
+  referredUserId: string;
+  referredUserEmail: string;
+  orderId: string;
+  challengeName: string;
+  challengeSize: number;
+  purchaseAmount: number;
+  commissionAmount: number;
+  status: 'pending' | 'approved' | 'paid';
+  createdAt: string;
+}
+
+export interface AffiliatePayoutRequest {
+  id: string;
+  affiliateUserId: string;
+  userEmail: string;
+  userName: string;
+  amount: number;
+  method: 'bitcoin' | 'usdt' | 'bank';
+  details: string;
+  status: 'pending' | 'approved' | 'rejected' | 'paid';
+  createdAt: string;
+}
+
+
 

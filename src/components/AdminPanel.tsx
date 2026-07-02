@@ -2,9 +2,9 @@ import React, { useState } from 'react';
 import { 
   Users, CreditCard, Shield, ShieldAlert, BadgePercent, Check, X, 
   Trash2, ArrowRight, UserPlus, FileCheck, Power, RefreshCw, LogOut, Award,
-  Activity
+  Activity, Gift
 } from 'lucide-react';
-import { User, Account, Order, Trade, Coupon, PayoutRequest, RuleViolation } from '../types';
+import { User, Account, Order, Trade, Coupon, PayoutRequest, RuleViolation, AffiliateProfile, AffiliateCommission, AffiliatePayoutRequest } from '../types';
 import { COUPONS } from '../data';
 
 interface AdminPanelProps {
@@ -26,6 +26,10 @@ interface AdminPanelProps {
   onRefreshData: () => void;
   payoutRequests: PayoutRequest[];
   onUpdatePayoutStatus: (id: string, status: 'approved' | 'rejected') => void;
+  affiliateProfiles?: AffiliateProfile[];
+  commissions?: AffiliateCommission[];
+  affiliatePayoutRequests?: AffiliatePayoutRequest[];
+  challengeCommissions?: Record<string, number>;
 }
 
 export default function AdminPanel({
@@ -46,9 +50,13 @@ export default function AdminPanel({
   onDeleteCoupon,
   onRefreshData,
   payoutRequests,
-  onUpdatePayoutStatus
+  onUpdatePayoutStatus,
+  affiliateProfiles = [],
+  commissions = [],
+  affiliatePayoutRequests = [],
+  challengeCommissions = {}
 }: AdminPanelProps) {
-  const [adminTab, setAdminTab] = useState<'orders' | 'accounts' | 'users' | 'coupons' | 'payouts' | 'violations' | 'settings'>('orders');
+  const [adminTab, setAdminTab] = useState<'orders' | 'accounts' | 'users' | 'coupons' | 'payouts' | 'violations' | 'settings' | 'affiliates'>('orders');
   const [selectedTraderId, setSelectedTraderId] = useState<string | null>(null);
   const [selectedAccountForDetails, setSelectedAccountForDetails] = useState<Account | null>(null);
   const [selectedKycUser, setSelectedKycUser] = useState<User | null>(null);
@@ -66,7 +74,55 @@ export default function AdminPanel({
   const [newDiscount, setNewDiscount] = useState(10);
   const [newDesc, setNewDesc] = useState('');
 
-  const handleCreateCoupon = (e: React.FormEvent) => {
+   // Admin Affiliate Settings States
+   const [editingChallengeKey, setEditingChallengeKey] = useState('10000');
+   const [editingChallengeComm, setEditingChallengeComm] = useState('');
+   const [commSuccess, setCommSuccess] = useState('');
+   const [commError, setCommError] = useState('');
+ 
+   // Giveaway Form States
+   const [giveawayEmail, setGiveawayEmail] = useState('');
+   const [giveawayConfigId, setGiveawayConfigId] = useState('os-5k');
+   const [giveawayName, setGiveawayName] = useState('');
+   const [giveawayLoading, setGiveawayLoading] = useState(false);
+   const [giveawaySuccess, setGiveawaySuccess] = useState('');
+   const [giveawayError, setGiveawayError] = useState('');
+ 
+   const handleCreateGiveaway = async (e: React.FormEvent) => {
+     e.preventDefault();
+     setGiveawaySuccess('');
+     setGiveawayError('');
+     if (!giveawayEmail.trim()) {
+       setGiveawayError('Please enter a valid recipient Gmail.');
+       return;
+     }
+     setGiveawayLoading(true);
+     try {
+       const res = await fetch('/api/admin/giveaway', {
+         method: 'POST',
+         headers: { 'Content-Type': 'application/json' },
+         body: JSON.stringify({
+           email: giveawayEmail.trim(),
+           challengeConfigId: giveawayConfigId,
+           name: giveawayName.trim() || undefined
+         })
+       });
+       const data = await res.json();
+       if (!res.ok) {
+         throw new Error(data.error || 'Failed to create giveaway');
+       }
+       setGiveawaySuccess(`🎉 Success! Giveaway account ${data.account.id} ($${data.account.challengeSize.toLocaleString()}) has been granted and activated for ${data.account.userEmail}.`);
+       setGiveawayEmail('');
+       setGiveawayName('');
+       onRefreshData(); // Reload admin state!
+     } catch (err: any) {
+       setGiveawayError(err.message || 'Server error occurred');
+     } finally {
+       setGiveawayLoading(false);
+     }
+   };
+ 
+   const handleCreateCoupon = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCode.trim()) return;
     onAddCoupon({
@@ -139,6 +195,19 @@ export default function AdminPanel({
                 className={`px-3 py-1.5 rounded-lg text-xs font-medium uppercase tracking-wider transition-all cursor-pointer ${adminTab === 'settings' ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30' : 'text-gray-400 hover:text-white'}`}
               >
                 Settings
+              </button>
+              <button
+                onClick={() => setAdminTab('affiliates')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium uppercase tracking-wider transition-all cursor-pointer ${adminTab === 'affiliates' ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30' : 'text-gray-400 hover:text-white'}`}
+              >
+                Affiliates ({affiliatePayoutRequests.filter(p => p.status === 'pending').length})
+              </button>
+              <button
+                onClick={() => setAdminTab('giveaway')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium uppercase tracking-wider transition-all cursor-pointer flex items-center gap-1 ${adminTab === 'giveaway' ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30' : 'text-gray-400 hover:text-white'}`}
+              >
+                <Gift className="w-3.5 h-3.5" />
+                <span>Giveaway</span>
               </button>
             </nav>
           </div>
@@ -1308,6 +1377,528 @@ export default function AdminPanel({
                   {settingsLoading ? 'Saving...' : 'Save Admin Credentials'}
                 </button>
               </form>
+            </div>
+          </div>
+        )}
+
+        {adminTab === 'affiliates' && (() => {
+          const handleSaveCommissionRate = async (e: React.FormEvent) => {
+            e.preventDefault();
+            setCommSuccess('');
+            setCommError('');
+            const rate = parseFloat(editingChallengeComm);
+            if (isNaN(rate) || rate < 0) {
+              setCommError('Please enter a valid commission amount.');
+              return;
+            }
+            try {
+              const res = await fetch('/api/admin/affiliates/commissions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  challengeSize: parseInt(editingChallengeKey),
+                  commissionAmount: rate
+                })
+              });
+              const data = await res.json();
+              if (!res.ok) {
+                setCommError(data.error || 'Failed to update commission rate.');
+              } else {
+                setCommSuccess(`Commission rate updated to $${rate.toFixed(2)} successfully!`);
+                setEditingChallengeComm('');
+                onRefreshData();
+              }
+            } catch (err) {
+              setCommError('Network error updating commission rate.');
+            }
+          };
+
+          const handleUpdateCommissionStatus = async (id: string, status: 'approved' | 'rejected' | 'paid') => {
+            try {
+              const res = await fetch(`/api/admin/affiliates/commissions/${id}/status`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status })
+              });
+              if (!res.ok) {
+                const data = await res.json();
+                alert(data.error || 'Failed to update commission.');
+              } else {
+                onRefreshData();
+              }
+            } catch (err) {
+              alert('Network error updating commission status.');
+            }
+          };
+
+          const handleUpdateAffiliatePayoutStatus = async (id: string, status: 'approved' | 'rejected' | 'paid') => {
+            try {
+              const res = await fetch(`/api/admin/affiliates/payouts/${id}/status`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status })
+              });
+              if (!res.ok) {
+                const data = await res.json();
+                alert(data.error || 'Failed to update payout status.');
+              } else {
+                onRefreshData();
+              }
+            } catch (err) {
+              alert('Network error updating payout status.');
+            }
+          };
+
+          return (
+            <div className="space-y-8 animate-in fade-in duration-200 text-left">
+              
+              {/* Top Commission Rules Settings */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                <div className="lg:col-span-4 bg-[#0D1017] border border-gray-800 rounded-2xl p-6">
+                  <h3 className="text-sm font-bold text-white mb-1">Set Commission per Challenge</h3>
+                  <p className="text-[10px] text-gray-500 font-mono uppercase tracking-wider mb-4">Define flat payouts in USD</p>
+
+                  {commSuccess && (
+                    <div className="bg-[#10B981]/10 border border-[#10B981]/25 text-[#10B981] text-xs p-3 rounded-lg mb-4">
+                      {commSuccess}
+                    </div>
+                  )}
+                  {commError && (
+                    <div className="bg-red-500/10 border border-red-500/25 text-red-400 text-xs p-3 rounded-lg mb-4">
+                      {commError}
+                    </div>
+                  )}
+
+                  <form onSubmit={handleSaveCommissionRate} className="space-y-4">
+                    <div>
+                      <label className="block text-[10px] font-mono text-gray-400 uppercase mb-1">Challenge Account Size</label>
+                      <select
+                        value={editingChallengeKey}
+                        onChange={(e) => setEditingChallengeKey(e.target.value)}
+                        className="w-full bg-[#07090E] border border-gray-800 rounded-lg py-2 px-3 text-xs text-white focus:outline-none"
+                      >
+                        <option value="5000">$5,000 Challenge</option>
+                        <option value="10000">$10,000 Challenge</option>
+                        <option value="25000">$25,000 Challenge</option>
+                        <option value="50000">$50,000 Challenge</option>
+                        <option value="100000">$100,000 Challenge</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-mono text-gray-400 uppercase mb-1">Commission Reward (USD)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        required
+                        value={editingChallengeComm}
+                        onChange={(e) => setEditingChallengeComm(e.target.value)}
+                        placeholder={`Current: $${challengeCommissions[editingChallengeKey] || (editingChallengeKey === '5000' ? 7.35 : editingChallengeKey === '10000' ? 14.85 : 44.85)}`}
+                        className="w-full bg-[#07090E] border border-gray-800 rounded-lg py-2 px-3 text-xs text-white focus:outline-none font-mono"
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      className="w-full bg-amber-500 hover:bg-amber-600 text-black py-2 rounded-lg text-xs font-bold transition-all cursor-pointer"
+                    >
+                      Save Commission Rule
+                    </button>
+                  </form>
+                </div>
+
+                {/* Active Affiliate Profiles List */}
+                <div className="lg:col-span-8 bg-[#0D1017] border border-gray-800 rounded-2xl p-6">
+                  <h3 className="text-sm font-bold text-white mb-1">Active Affiliate Profiles ({affiliateProfiles.length})</h3>
+                  <p className="text-[10px] text-gray-500 font-mono uppercase tracking-wider mb-4">Registered partners and tracking performance</p>
+
+                  <div className="overflow-x-auto max-h-[220px]">
+                    <table className="w-full text-left text-xs font-mono">
+                      <thead>
+                        <tr className="border-b border-gray-800 text-[10px] text-gray-500 uppercase">
+                          <th className="pb-2">User / Email</th>
+                          <th className="pb-2">Code</th>
+                          <th className="pb-2 text-right">Clicks</th>
+                          <th className="pb-2 text-right">Referrals</th>
+                          <th className="pb-2 text-right">Total Earned</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-900">
+                        {affiliateProfiles.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="py-6 text-center text-gray-500 font-sans text-xs">No affiliate accounts registered yet.</td>
+                          </tr>
+                        ) : (
+                          affiliateProfiles.map((p, i) => {
+                            const refCount = users.filter(u => u.referredBy && u.referredBy.toLowerCase() === p.referralCode.toLowerCase()).length;
+                            const myComms = commissions.filter(c => c.affiliateUserId === p.userId);
+                            const totalEarned = myComms.reduce((sum, c) => sum + c.commissionAmount, 0);
+
+                            return (
+                              <tr key={i} className="hover:bg-white/5">
+                                <td className="py-2.5 font-sans font-medium text-white">{p.userEmail || p.userId}</td>
+                                <td className="py-2.5 text-amber-400 font-bold">{p.referralCode}</td>
+                                <td className="py-2.5 text-right text-gray-300">{p.clicks || 0}</td>
+                                <td className="py-2.5 text-right text-sky-400 font-bold">{refCount}</td>
+                                <td className="py-2.5 text-right text-emerald-400 font-bold">${totalEarned.toFixed(2)}</td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+              {/* Outstanding Commissions Pending Audit */}
+              <div className="bg-[#0D1017] border border-gray-800 rounded-2xl p-6">
+                <h3 className="text-sm font-bold text-white mb-1">Affiliate Commissions & Sales Logs ({commissions.length})</h3>
+                <p className="text-[10px] text-gray-500 font-mono uppercase tracking-wider mb-4">Commissions awarded for challenge purchases</p>
+
+                <div className="overflow-x-auto max-h-[300px]">
+                  <table className="w-full text-left text-xs font-mono">
+                    <thead>
+                      <tr className="border-b border-gray-800 text-[10px] text-gray-500 uppercase">
+                        <th className="pb-2">Commission ID</th>
+                        <th className="pb-2">Affiliate</th>
+                        <th className="pb-2">Challenge</th>
+                        <th className="pb-2 text-right">Price</th>
+                        <th className="pb-2 text-right">Commission</th>
+                        <th className="pb-2 text-center">Status</th>
+                        <th className="pb-2 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-900">
+                      {commissions.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} className="py-6 text-center text-gray-500 font-sans text-xs">No referral purchase commissions recorded.</td>
+                        </tr>
+                      ) : (
+                        commissions.map((c, i) => (
+                          <tr key={i} className="hover:bg-white/5">
+                            <td className="py-2.5 text-gray-400 font-mono">{c.id.slice(0, 8)}</td>
+                            <td className="py-2.5 text-white font-sans">{users.find(u => u.id === c.affiliateUserId)?.email || c.affiliateUserId}</td>
+                            <td className="py-2.5 text-amber-500">{c.challengeName}</td>
+                            <td className="py-2.5 text-right text-gray-300">${c.purchaseAmount.toFixed(2)}</td>
+                            <td className="py-2.5 text-right text-emerald-400 font-bold">${c.commissionAmount.toFixed(2)}</td>
+                            <td className="py-2.5 text-center">
+                              <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-sans font-bold uppercase ${
+                                c.status === 'paid' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/15' :
+                                c.status === 'approved' ? 'bg-sky-500/10 text-sky-400 border border-sky-500/15' :
+                                'bg-amber-500/10 text-amber-400 border border-amber-500/15'
+                              }`}>
+                                {c.status}
+                              </span>
+                            </td>
+                            <td className="py-2.5 text-right space-x-2">
+                              {c.status === 'pending' && (
+                                <>
+                                  <button
+                                    onClick={() => handleUpdateCommissionStatus(c.id, 'approved')}
+                                    className="px-2 py-1 text-[10px] font-sans font-bold bg-emerald-500 text-black rounded hover:brightness-110 cursor-pointer"
+                                  >
+                                    Approve
+                                  </button>
+                                  <button
+                                    onClick={() => handleUpdateCommissionStatus(c.id, 'rejected')}
+                                    className="px-2 py-1 text-[10px] font-sans font-bold bg-red-500/20 text-red-400 rounded hover:bg-red-500/35 border border-red-500/10 cursor-pointer"
+                                  >
+                                    Reject
+                                  </button>
+                                </>
+                              )}
+                              {c.status === 'approved' && (
+                                <button
+                                  onClick={() => handleUpdateCommissionStatus(c.id, 'paid')}
+                                  className="px-2 py-1 text-[10px] font-sans font-bold bg-sky-500 text-black rounded hover:brightness-110 cursor-pointer"
+                                >
+                                  Mark Paid
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Commission Withdrawal Payout Requests Audit */}
+              <div className="bg-[#0D1017] border border-gray-800 rounded-2xl p-6">
+                <h3 className="text-sm font-bold text-white mb-1">Affiliate Payout Requests ({affiliatePayoutRequests.length})</h3>
+                <p className="text-[10px] text-gray-500 font-mono uppercase tracking-wider mb-4">Requests for commission settlements</p>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs font-mono">
+                    <thead>
+                      <tr className="border-b border-gray-800 text-[10px] text-gray-500 uppercase">
+                        <th className="pb-2">Request ID</th>
+                        <th className="pb-2">Affiliate</th>
+                        <th className="pb-2">Method</th>
+                        <th className="pb-2">Details</th>
+                        <th className="pb-2 text-right">Amount</th>
+                        <th className="pb-2 text-center">Status</th>
+                        <th className="pb-2 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-900">
+                      {affiliatePayoutRequests.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} className="py-6 text-center text-gray-500 font-sans text-xs">No affiliate payout requests submitted.</td>
+                        </tr>
+                      ) : (
+                        affiliatePayoutRequests.map((p, i) => (
+                          <tr key={i} className="hover:bg-white/5">
+                            <td className="py-2.5 text-gray-400 font-mono">{p.id}</td>
+                            <td className="py-2.5 text-white font-sans">{p.userEmail}</td>
+                            <td className="py-2.5 text-white uppercase text-[10px]">{p.method}</td>
+                            <td className="py-2.5 text-gray-300 max-w-[200px] truncate" title={p.details}>{p.details}</td>
+                            <td className="py-2.5 text-right text-amber-400 font-bold font-mono">${p.amount.toFixed(2)}</td>
+                            <td className="py-2.5 text-center">
+                              <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-sans font-bold uppercase ${
+                                p.status === 'paid' ? 'bg-emerald-500/10 text-emerald-400' :
+                                p.status === 'approved' ? 'bg-sky-500/10 text-sky-400' :
+                                p.status === 'rejected' ? 'bg-red-500/10 text-red-400' :
+                                'bg-amber-500/10 text-amber-400'
+                              }`}>
+                                {p.status}
+                              </span>
+                            </td>
+                            <td className="py-2.5 text-right space-x-2">
+                              {p.status === 'pending' && (
+                                <>
+                                  <button
+                                    onClick={() => handleUpdateAffiliatePayoutStatus(p.id, 'paid')}
+                                    className="px-2 py-1 text-[10px] font-sans font-bold bg-emerald-500 text-black rounded hover:brightness-110 cursor-pointer"
+                                  >
+                                    Approve & Pay
+                                  </button>
+                                  <button
+                                    onClick={() => handleUpdateAffiliatePayoutStatus(p.id, 'rejected')}
+                                    className="px-2 py-1 text-[10px] font-sans font-bold bg-red-500/20 text-red-400 rounded hover:bg-red-500/35 border border-red-500/10 cursor-pointer"
+                                  >
+                                    Reject
+                                  </button>
+                                </>
+                              )}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+            </div>
+          );
+        })()}
+
+        {/* TAB: GIVEAWAY PANEL */}
+        {adminTab === 'giveaway' && (
+          <div className="max-w-4xl mx-auto space-y-6">
+            <div className="border-b border-gray-800 pb-4">
+              <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                <Gift className="w-5 h-5 text-amber-500 animate-pulse" />
+                <span>Admin Giveaway Panel</span>
+              </h2>
+              <p className="text-xs text-gray-400 mt-1">
+                Grant and instantly activate free evaluation challenges or funded accounts to specific users via their Gmail.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {/* CREATE FORM */}
+              <div className="md:col-span-2 bg-[#0D1017] border border-gray-800 rounded-2xl p-6 space-y-4">
+                <h3 className="text-sm font-bold text-gray-200 uppercase tracking-wider font-mono">Create Giveaway Account</h3>
+                
+                <form onSubmit={handleCreateGiveaway} className="space-y-4">
+                  {/* GMAIL FIELD */}
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-mono uppercase tracking-wider text-gray-400">Recipient Email (Gmail)</label>
+                    <input
+                      type="email"
+                      required
+                      placeholder="e.g. trader@gmail.com"
+                      value={giveawayEmail}
+                      onChange={(e) => setGiveawayEmail(e.target.value)}
+                      className="w-full bg-[#05070B] border border-gray-800 focus:border-amber-500/50 rounded-xl px-4 py-2.5 text-xs text-white placeholder-gray-600 outline-none transition-all font-mono"
+                    />
+                    <p className="text-[10px] text-gray-500 font-sans">
+                      If this user is not registered yet, we will auto-generate an account with default password "123456".
+                    </p>
+                  </div>
+
+                  {/* USER DISPLAY NAME (OPTIONAL) */}
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-mono uppercase tracking-wider text-gray-400">Trader Display Name (Optional)</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. John Doe (Defaults to 'Giveaway Trader' if left empty)"
+                      value={giveawayName}
+                      onChange={(e) => setGiveawayName(e.target.value)}
+                      className="w-full bg-[#05070B] border border-gray-800 focus:border-amber-500/50 rounded-xl px-4 py-2.5 text-xs text-white placeholder-gray-600 outline-none transition-all"
+                    />
+                  </div>
+
+                  {/* ACCOUNT SIZE & CONFIG SELECT */}
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-mono uppercase tracking-wider text-gray-400">Challenge Type & Account Size</label>
+                    <select
+                      value={giveawayConfigId}
+                      onChange={(e) => setGiveawayConfigId(e.target.value)}
+                      className="w-full bg-[#05070B] border border-gray-800 focus:border-amber-500/50 rounded-xl px-4 py-2.5 text-xs text-white outline-none transition-all cursor-pointer font-mono"
+                    >
+                      <option value="os-5k">One-Step - $5,000 Plan</option>
+                      <option value="os-10k">One-Step - $10,000 Plan</option>
+                      <option value="ts-5k">Two-Step - $5,000 Plan</option>
+                      <option value="ts-10k">Two-Step - $10,000 Plan</option>
+                      <option value="inst-1k">Instant Funded - $1,000 Plan</option>
+                      <option value="inst-2k">Instant Funded - $2,000 Plan</option>
+                      <option value="ppl-5k">Pass Pay Later - $5,000 Plan</option>
+                      <option value="ppl-10k">Pass Pay Later - $10,000 Plan</option>
+                    </select>
+                  </div>
+
+                  {/* STATUS NOTICES */}
+                  {giveawaySuccess && (
+                    <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs rounded-lg leading-relaxed">
+                      {giveawaySuccess}
+                    </div>
+                  )}
+
+                  {giveawayError && (
+                    <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-400 text-xs rounded-lg leading-relaxed">
+                      {giveawayError}
+                    </div>
+                  )}
+
+                  {/* SUBMIT BUTTON */}
+                  <button
+                    type="submit"
+                    disabled={giveawayLoading}
+                    className="w-full bg-amber-500 hover:bg-amber-600 disabled:bg-amber-500/50 text-black font-bold text-xs uppercase tracking-wider py-3 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    {giveawayLoading ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Creating Giveaway Account...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Gift className="w-3.5 h-3.5" />
+                        <span>Grant Free Giveaway Account</span>
+                      </>
+                    )}
+                  </button>
+                </form>
+              </div>
+
+              {/* REGISTERED TRADERS AUTOFILL */}
+              <div className="bg-[#0D1017] border border-gray-800 rounded-2xl p-6 space-y-3 flex flex-col h-[400px]">
+                <h3 className="text-sm font-bold text-gray-200 uppercase tracking-wider font-mono flex items-center gap-1">
+                  <Users className="w-4 h-4 text-amber-500" />
+                  <span>Select Registered Trader</span>
+                </h3>
+                <p className="text-[10px] text-gray-400 leading-relaxed font-sans">
+                  Click on any existing registered trader below to quickly auto-populate their email address into the giveaway form.
+                </p>
+
+                <div className="flex-1 overflow-y-auto space-y-1 pr-1 scrollbar-thin">
+                  {users.length === 0 ? (
+                    <p className="text-[11px] text-gray-500 font-mono text-center pt-8">No registered traders.</p>
+                  ) : (
+                    users
+                      .filter(u => u.role !== 'admin')
+                      .map(u => (
+                        <button
+                          key={u.id}
+                          onClick={() => {
+                            setGiveawayEmail(u.email);
+                            if (u.name) setGiveawayName(u.name);
+                          }}
+                          className="w-full text-left p-2 rounded-xl bg-gray-900/50 hover:bg-gray-900 border border-gray-800/60 hover:border-amber-500/30 transition-all group flex flex-col cursor-pointer"
+                        >
+                          <span className="text-xs font-semibold text-white group-hover:text-amber-400 transition-colors">{u.name || 'Anonymous'}</span>
+                          <span className="text-[10px] text-gray-500 font-mono mt-0.5">{u.email}</span>
+                        </button>
+                      ))
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* GIVEAWAY HISTORY */}
+            <div className="bg-[#0D1017] border border-gray-800 rounded-2xl p-6 space-y-4">
+              <div>
+                <h3 className="text-sm font-bold text-gray-200 uppercase tracking-wider font-mono">Current Giveaway Accounts</h3>
+                <p className="text-xs text-gray-400 mt-1">Audit trail of accounts created with administrative "GIVEAWAY" promotions.</p>
+              </div>
+
+              <div className="overflow-x-auto font-sans">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-gray-800 text-gray-500 font-mono uppercase tracking-wider text-[10px]">
+                      <th className="pb-3 pl-2">Account ID</th>
+                      <th className="pb-3">Trader Info</th>
+                      <th className="pb-3">Plan Details</th>
+                      <th className="pb-3">Initial Size</th>
+                      <th className="pb-3">Status</th>
+                      <th className="pb-3 text-right pr-2">Date Granted</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-900 font-mono">
+                    {(() => {
+                      const giveawayAccounts = accounts.filter(acc => {
+                        const hasGiveawayOrder = orders.some(o => o.accountId === acc.id && o.couponUsed === 'GIVEAWAY');
+                        return hasGiveawayOrder;
+                      });
+
+                      if (giveawayAccounts.length === 0) {
+                        return (
+                          <tr>
+                            <td colSpan={6} className="py-6 text-center text-gray-500 font-mono">No giveaway accounts found.</td>
+                          </tr>
+                        );
+                      }
+
+                      return giveawayAccounts.map(acc => {
+                        const order = orders.find(o => o.accountId === acc.id);
+                        return (
+                          <tr key={acc.id} className="hover:bg-gray-900/30">
+                            <td className="py-3 font-semibold text-white pl-2">{acc.id}</td>
+                            <td className="py-3">
+                              <div className="font-sans font-semibold text-gray-300">{acc.userName}</div>
+                              <div className="text-[10px] text-gray-500">{acc.userEmail}</div>
+                            </td>
+                            <td className="py-3">
+                              <span className="inline-flex items-center gap-1 text-amber-400 font-sans">
+                                <Gift className="w-3 h-3 text-amber-500" />
+                                <span>{acc.challengeName}</span>
+                              </span>
+                            </td>
+                            <td className="py-3 text-gray-300">${acc.challengeSize.toLocaleString()}</td>
+                            <td className="py-3">
+                              <span className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-sans font-bold uppercase ${
+                                acc.status === 'active' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/25' :
+                                acc.status === 'suspended' ? 'bg-red-500/10 text-red-400 border border-red-500/25' :
+                                'bg-gray-800 text-gray-400 font-sans'
+                              }`}>
+                                {acc.status}
+                              </span>
+                            </td>
+                            <td className="py-3 text-right text-gray-500 pr-2">
+                              {order?.createdAt ? new Date(order.createdAt).toLocaleDateString() : 'N/A'}
+                            </td>
+                          </tr>
+                        );
+                      });
+                    })()}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         )}

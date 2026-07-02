@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  User, Account, Order, Trade, MarketQuote, Candle, Coupon, AccountLog, KycStatus, OrderType, TradeDirection, ChallengeConfig, PayoutRequest, RuleViolation 
+  User, Account, Order, Trade, MarketQuote, Candle, Coupon, AccountLog, KycStatus, OrderType, TradeDirection, ChallengeConfig, PayoutRequest, RuleViolation,
+  AffiliateProfile, AffiliateCommission, AffiliatePayoutRequest
 } from './types';
 import { CHALLENGES, COUPONS, INITIAL_QUOTES, ASSET_PROPERTIES } from './data';
 import AuthScreen from './components/AuthScreen';
@@ -68,6 +69,12 @@ export default function App() {
   const [quotes, setQuotes] = useState<MarketQuote[]>(INITIAL_QUOTES);
   const [ruleViolations, setRuleViolations] = useState<RuleViolation[]>([]);
   const [liveDataUnavailable, setLiveDataUnavailable] = useState(false);
+  
+  // Affiliate system states
+  const [affiliateProfiles, setAffiliateProfiles] = useState<AffiliateProfile[]>([]);
+  const [commissions, setCommissions] = useState<AffiliateCommission[]>([]);
+  const [affiliatePayoutRequests, setAffiliatePayoutRequests] = useState<AffiliatePayoutRequest[]>([]);
+  const [challengeCommissions, setChallengeCommissions] = useState<Record<string, number>>({});
 
   // Candles history for active chart rendering
   const [candles, setCandles] = useState<Record<string, Candle[]>>(() => {
@@ -100,6 +107,16 @@ export default function App() {
     if (ref) {
       localStorage.setItem('atfunding_referred_by', ref);
       console.log('Referral tracked from URL parameter:', ref);
+
+      // Register click with backend
+      fetch('/api/affiliates/click', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ referralCode: ref })
+      })
+        .then(res => res.json())
+        .then(data => console.log('Click registration result:', data))
+        .catch(err => console.error('Error registering referral click:', err));
     }
   }, []);
 
@@ -124,6 +141,18 @@ export default function App() {
             setLiveDataUnavailable(data.liveDataUnavailable || false);
             if (data.coupons) {
               setCoupons(data.coupons);
+            }
+            if (data.affiliateProfiles) {
+              setAffiliateProfiles(data.affiliateProfiles);
+            }
+            if (data.commissions) {
+              setCommissions(data.commissions);
+            }
+            if (data.affiliatePayoutRequests) {
+              setAffiliatePayoutRequests(data.affiliatePayoutRequests);
+            }
+            if (data.challengeCommissions) {
+              setChallengeCommissions(data.challengeCommissions);
             }
 
             // Update current logged-in user details if modified on server (e.g. KYC approved)
@@ -808,6 +837,10 @@ export default function App() {
             onRefreshData={handleForceSync}
             payoutRequests={payoutRequests}
             onUpdatePayoutStatus={handleUpdatePayoutStatus}
+            affiliateProfiles={affiliateProfiles}
+            commissions={commissions}
+            affiliatePayoutRequests={affiliatePayoutRequests}
+            challengeCommissions={challengeCommissions}
           />
         ) : (
           // Render Trader Dashboard
@@ -835,6 +868,11 @@ export default function App() {
             payoutRequests={payoutRequests}
             onCreatePayoutRequest={handleCreatePayoutRequest}
             trades={trades}
+            affiliateProfiles={affiliateProfiles}
+            commissions={commissions}
+            affiliatePayoutRequests={affiliatePayoutRequests}
+            challengeCommissions={challengeCommissions}
+            users={users}
           />
         )
       ) : (
