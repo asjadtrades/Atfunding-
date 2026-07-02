@@ -2,6 +2,8 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
+import nodemailer from 'nodemailer';
+
 
 // Server state types (matching src/types.ts)
 interface User {
@@ -465,6 +467,79 @@ function generateUniqueAccountId(): string {
     accountId = `ACC-${Math.floor(100000 + Math.random() * 900000)}`;
   } while (dataStore.accounts.some(a => a.id === accountId));
   return accountId;
+}
+
+// In-memory OTP store for password reset verification
+// Key: email (lowercased, trimmed), Value: { otp: string, expiresAt: number }
+const passwordResetOTPs = new Map<string, { otp: string; expiresAt: number }>();
+
+// Send OTP email helper function
+async function sendOTPEmail(email: string, otp: string): Promise<boolean> {
+  const host = process.env.SMTP_HOST;
+  const port = parseInt(process.env.SMTP_PORT || '587');
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASS;
+  const from = process.env.SMTP_FROM || 'ATFunding <no-reply@atfunding.com>';
+
+  console.log(`[OTP Engine] Generated OTP ${otp} for ${email}`);
+
+  // If credentials are not present, log to console as a fallback
+  if (!host || !user || !pass) {
+    console.warn(`[OTP Engine] SMTP credentials are not fully configured in environment variables. Real email will not be sent, but you can read the OTP from server logs above.`);
+    return false; // Indicating it was not sent via real email but fallback printed to log
+  }
+
+  try {
+    const transporter = nodemailer.createTransport({
+      host,
+      port,
+      secure: port === 465, // true for port 465, false for others
+      auth: {
+        user,
+        pass,
+      },
+      tls: {
+        rejectUnauthorized: false
+      }
+    });
+
+    const mailOptions = {
+      from,
+      to: email,
+      subject: `🔑 Security OTP: Reset Your ATFunding Password`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #1f2937; border-radius: 8px; background-color: #0b0f19; color: #f3f4f6;">
+          <div style="text-align: center; margin-bottom: 24px; border-bottom: 1px solid #1f2937; padding-bottom: 16px;">
+            <h1 style="color: #fbbf24; margin: 0; font-size: 24px; letter-spacing: 1px;">ATFunding</h1>
+            <p style="color: #9ca3af; font-size: 12px; text-transform: uppercase; margin: 4px 0 0 0;">Institutional Proprietary Trading Portal</p>
+          </div>
+          
+          <div style="padding: 10px 20px;">
+            <p style="font-size: 16px; line-height: 1.5; color: #e5e7eb;">Hello,</p>
+            <p style="font-size: 15px; line-height: 1.5; color: #d1d5db;">We received a request to reset your ATFunding password. Please use the following One-Time Password (OTP) to complete your security verification:</p>
+            
+            <div style="text-align: center; margin: 30px 0; padding: 15px; background-color: #111827; border: 1px solid #374151; border-radius: 6px;">
+              <span style="font-family: monospace; font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #fbbf24;">${otp}</span>
+            </div>
+            
+            <p style="font-size: 13px; color: #9ca3af; line-height: 1.5;">This OTP code is valid for <strong>10 minutes</strong>. If you did not request a password reset, please ignore this email and secure your account.</p>
+          </div>
+          
+          <div style="text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #1f2937; font-size: 12px; color: #6b7280;">
+            <p>ATFunding Proprietary Trading Platform • Institutional Brokerage Evaluation</p>
+            <p>This is an automated transaction verification message. Please do not reply directly.</p>
+          </div>
+        </div>
+      `,
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    console.log(`[OTP Engine] Real Email sent successfully to ${email}. Message ID: ${info.messageId}`);
+    return true;
+  } catch (error) {
+    console.error(`[OTP Engine] Failed to send real email to ${email}:`, error);
+    return false;
+  }
 }
 
 // Save database
@@ -1395,30 +1470,91 @@ async function startServer() {
     res.json({ success: true, user: newUser });
   });
 
-  app.post('/api/auth/reset-password', (req, res) => {
-    const { email, newPassword } = req.body;
-    if (!email || !newPassword) {
-      return res.status(400).json({ error: 'Email and new password are required.' });
+  // 1. FORGOT PASSWORD OTP GENERATION & SEND
+  app.post('/api/auth/forgot-password-request', async (req, res) => {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required.' });
     }
     const cleanEmail = email.toLowerCase().trim();
     const adminEmail = (dataStore.adminConfig?.email || 'atgrowfund@gmail.com').toLowerCase().trim();
 
+    // Verify if it is admin or a registered user
+    const isAdmin = cleanEmail === adminEmail;
+    const user = dataStore.users.find(u => u.email.toLowerCase().trim() === cleanEmail);
+
+    if (!isAdmin && !user) {
+      return res.status(400).json({ error: 'This email / Gmail is not registered.' });
+    }
+
+    // Generate a secure 6-digit OTP code
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    
+    // Save to OTP storage with a 10-minute validity
+    passwordResetOTPs.set(cleanEmail, {
+      otp,
+      expiresAt: Date.now() + 10 * 60 * 1000
+    });
+
+    // Send email using SMTP
+    const sentRealEmail = await sendOTPEmail(cleanEmail, otp);
+
+    res.json({
+      success: true,
+      sentRealEmail,
+      message: sentRealEmail 
+        ? 'A secure OTP code has been sent to your Gmail. Please enter it to verify.' 
+        : `An OTP code (${otp}) was generated. (Since SMTP is not fully configured, OTP is printed in server logs or can be entered directly: ${otp})`
+    });
+  });
+
+  // 2. PASSWORD RESET VERIFICATION WITH OTP
+  app.post('/api/auth/reset-password', (req, res) => {
+    const { email, otp, newPassword } = req.body;
+    if (!email || !otp || !newPassword) {
+      return res.status(400).json({ error: 'Email, OTP, and new password are required.' });
+    }
+    const cleanEmail = email.toLowerCase().trim();
+    const cleanOtp = otp.toString().trim();
+
+    // Check stored OTP code
+    const storedRecord = passwordResetOTPs.get(cleanEmail);
+    if (!storedRecord) {
+      return res.status(400).json({ error: 'No verification code was requested or sent for this email.' });
+    }
+
+    if (Date.now() > storedRecord.expiresAt) {
+      passwordResetOTPs.delete(cleanEmail);
+      return res.status(400).json({ error: 'The OTP code has expired. Please request a new one.' });
+    }
+
+    if (storedRecord.otp !== cleanOtp) {
+      return res.status(400).json({ error: 'Invalid verification OTP code. Please check and try again.' });
+    }
+
+    const adminEmail = (dataStore.adminConfig?.email || 'atgrowfund@gmail.com').toLowerCase().trim();
+
+    // OTP verified, perform password reset
     if (cleanEmail === adminEmail) {
       if (!dataStore.adminConfig) {
         dataStore.adminConfig = { email: 'atgrowfund@gmail.com', password: '@Asjad.khan07' };
       }
       dataStore.adminConfig.password = newPassword;
       saveDatabase();
+      passwordResetOTPs.delete(cleanEmail);
       return res.json({ success: true, message: 'Admin password reset successfully.' });
     }
 
     const user = dataStore.users.find(u => u.email.toLowerCase().trim() === cleanEmail);
     if (!user) {
+      passwordResetOTPs.delete(cleanEmail);
       return res.status(400).json({ error: 'This email is not registered.' });
     }
 
     user.password = newPassword;
     saveDatabase();
+    passwordResetOTPs.delete(cleanEmail);
+
     res.json({ success: true, message: 'Password reset successfully.' });
   });
 
