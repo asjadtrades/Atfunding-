@@ -348,7 +348,7 @@ export default function TradingTerminal({
   const [isChartFullscreen, setIsChartFullscreen] = useState(false);
 
   // Chart mode: 'tradingview' or 'simulator'
-  const [chartMode, setChartMode] = useState<'tradingview' | 'simulator'>('tradingview');
+  const [chartMode, setChartMode] = useState<'tradingview' | 'simulator'>('simulator');
 
   // Chart crosshair position
   const [crosshair, setCrosshair] = useState<{ x: number; y: number } | null>(null);
@@ -370,7 +370,10 @@ export default function TradingTerminal({
     low: liveMarketPrice.low
   };
 
-  const [realCandles, setRealCandles] = useState<Candle[]>([]);
+  const [realCandles, setRealCandles] = useState<Candle[]>(() => {
+    const key = activeSymbol.toUpperCase().replace('/', '');
+    return candles[activeSymbol] || candles[key] || [];
+  });
 
   useEffect(() => {
     let isMounted = true;
@@ -382,9 +385,18 @@ export default function TradingTerminal({
           if (isMounted) {
             setRealCandles(data);
           }
+        } else {
+          const key = activeSymbol.toUpperCase().replace('/', '');
+          if (isMounted) {
+            setRealCandles(candles[activeSymbol] || candles[key] || []);
+          }
         }
       } catch (e) {
         console.warn("Failed to fetch real candles:", e);
+        const key = activeSymbol.toUpperCase().replace('/', '');
+        if (isMounted) {
+          setRealCandles(candles[activeSymbol] || candles[key] || []);
+        }
       }
     };
     fetchCandles();
@@ -393,7 +405,7 @@ export default function TradingTerminal({
       isMounted = false;
       clearInterval(interval);
     };
-  }, [activeSymbol, timeframe]);
+  }, [activeSymbol, timeframe, candles]);
 
   // Real-time tick update for realCandles
   useEffect(() => {
