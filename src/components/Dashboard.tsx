@@ -546,7 +546,9 @@ export default function Dashboard({
                       {account.status === 'breached' && (
                         <div className="absolute inset-0 bg-black/75 backdrop-blur-xxs flex flex-col items-center justify-center p-4 z-10 text-center">
                           <AlertTriangle className="w-10 h-10 text-red-500 mb-2" />
-                          <h4 className="text-base font-bold text-red-400">ACCOUNT BREACHED</h4>
+                          <h4 className="text-base font-bold text-red-400">
+                            {account.rejectionReason ? "ORDER REJECTED" : "ACCOUNT BREACHED"}
+                          </h4>
                           <p className="text-xxs text-gray-400 max-w-xs mt-1 font-medium mb-3.5">
                             {account.breachedReason || "This account was suspended due to a rule violation. Please respect the 2-minute minimum hold and 15-minute interval rules."}
                           </p>

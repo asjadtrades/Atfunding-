@@ -465,10 +465,14 @@ export default function App() {
     }
   };
 
-  const handleRejectOrder = async (orderId: string) => {
+  const handleRejectOrder = async (orderId: string, reason?: string) => {
     try {
       const res = await fetch(`/api/admin/orders/${orderId}/reject`, {
-        method: 'POST'
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ reason })
       });
 
       if (!res.ok) {

@@ -57,6 +57,7 @@ export interface Account {
   payoutSharePercent: number;
   createdAt: string;
   breachedReason?: string; // Reason why account was breached
+  rejectionReason?: string; // Reason why account/order was rejected
   warningsCount?: number; // Number of warnings issued for early close
   flaggedForReview?: boolean; // Flag for admin review
   reviewReason?: string; // Reason for review flag
@@ -86,6 +87,7 @@ export interface Order {
   status: OrderStatus;
   createdAt: string;
   accountId?: string;
+  rejectionReason?: string; // Reason why order was rejected
   transactionId?: string;
   screenshotUrl?: string;
   recipientAddress?: string;

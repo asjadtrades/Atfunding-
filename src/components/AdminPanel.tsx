@@ -17,7 +17,7 @@ interface AdminPanelProps {
   coupons: Coupon[];
   ruleViolations: RuleViolation[];
   onApproveOrder: (orderId: string) => void;
-  onRejectOrder: (orderId: string) => void;
+  onRejectOrder: (orderId: string, reason?: string) => void;
   onApproveKyc: (userId: string) => void;
   onRejectKyc: (userId: string) => void;
   onUpdateAccountStatus: (accountId: string, status: Account['status'], phase: Account['phase'], breachedReason?: string) => void;
@@ -61,6 +61,8 @@ export default function AdminPanel({
   const [selectedAccountForDetails, setSelectedAccountForDetails] = useState<Account | null>(null);
   const [selectedKycUser, setSelectedKycUser] = useState<User | null>(null);
   const [customBreachReason, setCustomBreachReason] = useState('');
+  const [rejectingOrderId, setRejectingOrderId] = useState<string | null>(null);
+  const [rejectionReasonText, setRejectionReasonText] = useState('');
   
   // Admin credentials state
   const [adminEmailInput, setAdminEmailInput] = useState(currentUser.email);
@@ -423,9 +425,27 @@ export default function AdminPanel({
                             }}
                             className="font-semibold text-gray-200 hover:text-amber-400 transition-colors text-left block"
                           >
-                            {order.userName}
+                            {order.userName} {order.surname || ''}
                           </button>
                           <p className="text-xxs text-gray-500 font-mono">{order.userEmail}</p>
+                          {(order.phoneNumber || order.city || order.country) && (
+                            <div className="mt-1 space-y-0.5 text-[10px] text-gray-400 font-mono">
+                              {order.phoneNumber && (
+                                <div className="flex items-center gap-1">
+                                  <span className="text-gray-600">Tel:</span>
+                                  <span className="text-amber-400/95 select-all font-semibold">{order.phoneNumber}</span>
+                                </div>
+                              )}
+                              {(order.city || order.country) && (
+                                <div className="flex items-center gap-1 text-gray-400">
+                                  <span className="text-gray-600">Loc:</span>
+                                  <span className="truncate max-w-[150px] inline-block" title={`${order.city || ''} ${order.zipCode || ''}, ${order.country || ''}`}>
+                                    {[order.city, order.country].filter(Boolean).join(', ')} {order.zipCode ? `(${order.zipCode})` : ''}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </td>
                         <td className="py-3">
                           <button
@@ -535,7 +555,10 @@ export default function AdminPanel({
                                 <span>Approve</span>
                               </button>
                               <button
-                                onClick={() => onRejectOrder(order.id)}
+                                onClick={() => {
+                                  setRejectingOrderId(order.id);
+                                  setRejectionReasonText('');
+                                }}
                                 className="bg-red-500/20 hover:bg-red-500/30 text-red-400 px-2 py-1 rounded text-xxs font-bold flex items-center gap-0.5 cursor-pointer"
                               >
                                 <X className="w-3 h-3" />
@@ -616,6 +639,34 @@ export default function AdminPanel({
                               {account.userName}
                             </button>
                             <p className="text-xxs text-gray-500 font-mono">{account.userEmail}</p>
+                            {(() => {
+                              const mOrder = orders.find(o => o.accountId === account.id)
+                                || orders.find(o => o.userId === account.userId && o.challengeConfigId === account.challengeConfigId)
+                                || orders.find(o => o.userEmail?.toLowerCase() === account.userEmail?.toLowerCase())
+                                || orders.find(o => o.userId === account.userId);
+                              const tProfile = users.find(u => u.id === account.userId || u.email?.toLowerCase() === account.userEmail?.toLowerCase());
+                              const pStr = mOrder?.phoneNumber || tProfile?.whatsapp || '';
+                              const locStr = [mOrder?.city, mOrder?.country].filter(Boolean).join(', ');
+                              if (!pStr && !locStr) return null;
+                              return (
+                                <div className="mt-1 space-y-0.5 text-[10px] text-gray-400 font-mono">
+                                  {pStr && (
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-gray-600">Tel:</span>
+                                      <span className="text-amber-400/95 select-all font-semibold">{pStr}</span>
+                                    </div>
+                                  )}
+                                  {locStr && (
+                                    <div className="flex items-center gap-1 text-gray-400">
+                                      <span className="text-gray-600">Loc:</span>
+                                      <span className="truncate max-w-[150px] inline-block" title={`${locStr} ${mOrder?.zipCode ? `(${mOrder.zipCode})` : ''}`}>
+                                        {locStr} {mOrder?.zipCode ? `(${mOrder.zipCode})` : ''}
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })()}
                             {account.flaggedForReview && account.reviewReason && (
                               <p className="text-[10px] text-amber-500 font-mono mt-1 bg-amber-500/5 px-2 py-0.5 rounded border border-amber-500/10 max-w-xs break-words">
                                 {account.reviewReason}
@@ -766,7 +817,33 @@ export default function AdminPanel({
                     return (
                       <tr key={user.id} className="hover:bg-gray-900/30">
                         <td className="py-3 font-semibold text-white pl-2">{user.name}</td>
-                        <td className="py-3 font-mono text-gray-300">{user.email}</td>
+                        <td className="py-3 font-mono text-gray-300">
+                          <div>{user.email}</div>
+                          {(() => {
+                            const uOrder = orders.find(o => o.userId === user.id || o.userEmail?.toLowerCase() === user.email?.toLowerCase());
+                            const pStr = uOrder?.phoneNumber || user.whatsapp || '';
+                            const locStr = [uOrder?.city, uOrder?.country].filter(Boolean).join(', ');
+                            if (!pStr && !locStr) return null;
+                            return (
+                              <div className="mt-1 space-y-0.5 text-[10px] text-gray-400 font-mono">
+                                {pStr && (
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-gray-600">Tel:</span>
+                                    <span className="text-amber-400/95 select-all font-semibold">{pStr}</span>
+                                  </div>
+                                )}
+                                {locStr && (
+                                  <div className="flex items-center gap-1 text-gray-400">
+                                    <span className="text-gray-600">Loc:</span>
+                                    <span className="truncate max-w-[150px] inline-block" title={`${locStr} ${uOrder?.zipCode ? `(${uOrder.zipCode})` : ''}`}>
+                                      {locStr} {uOrder?.zipCode ? `(${uOrder.zipCode})` : ''}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </td>
                         <td className="py-3 text-center font-bold text-amber-500 font-mono">
                           {userAccountsCount}
                         </td>
@@ -2202,7 +2279,9 @@ export default function AdminPanel({
                   {selectedAccountForDetails.status === 'pending_payment' && (
                     <button
                       onClick={() => {
-                        const ord = orders.find(o => o.accountId === selectedAccountForDetails.id || (o.userId === selectedAccountForDetails.userId && o.challengeConfigId === selectedAccountForDetails.challengeConfigId));
+                        const ord = orders.find(o => o.accountId === selectedAccountForDetails.id)
+                          || orders.find(o => o.userId === selectedAccountForDetails.userId && o.challengeConfigId === selectedAccountForDetails.challengeConfigId)
+                          || orders.find(o => o.userEmail?.toLowerCase() === selectedAccountForDetails.userEmail?.toLowerCase());
                         if (ord) {
                           onApproveOrder(ord.id);
                           setSelectedAccountForDetails({ ...selectedAccountForDetails, status: 'active' });
@@ -2264,8 +2343,11 @@ export default function AdminPanel({
                     <h4 className="text-xs font-mono uppercase text-amber-500 tracking-wider font-bold">Trader Contact Information</h4>
                     
                     {(() => {
-                      const matchedOrder = orders.find(o => o.accountId === selectedAccountForDetails.id || (o.userId === selectedAccountForDetails.userId && o.challengeConfigId === selectedAccountForDetails.challengeConfigId));
-                      const traderProfile = users.find(u => u.id === selectedAccountForDetails.userId);
+                      const matchedOrder = orders.find(o => o.accountId === selectedAccountForDetails.id)
+                        || orders.find(o => o.userId === selectedAccountForDetails.userId && o.challengeConfigId === selectedAccountForDetails.challengeConfigId)
+                        || orders.find(o => o.userEmail?.toLowerCase() === selectedAccountForDetails.userEmail?.toLowerCase())
+                        || orders.find(o => o.userId === selectedAccountForDetails.userId);
+                      const traderProfile = users.find(u => u.id === selectedAccountForDetails.userId || u.email?.toLowerCase() === selectedAccountForDetails.userEmail?.toLowerCase());
                       const emailStr = selectedAccountForDetails.userEmail || traderProfile?.email || 'N/A';
                       const phoneStr = matchedOrder?.phoneNumber || traderProfile?.whatsapp || 'N/A';
                       const nameStr = selectedAccountForDetails.userName || traderProfile?.name || matchedOrder?.userName || 'N/A';
@@ -2372,7 +2454,10 @@ export default function AdminPanel({
 
                   {/* ORDER PAYMENT DETAILS */}
                   {(() => {
-                    const matchedOrder = orders.find(o => o.accountId === selectedAccountForDetails.id || (o.userId === selectedAccountForDetails.userId && o.challengeConfigId === selectedAccountForDetails.challengeConfigId));
+                    const matchedOrder = orders.find(o => o.accountId === selectedAccountForDetails.id)
+                      || orders.find(o => o.userId === selectedAccountForDetails.userId && o.challengeConfigId === selectedAccountForDetails.challengeConfigId)
+                      || orders.find(o => o.userEmail?.toLowerCase() === selectedAccountForDetails.userEmail?.toLowerCase())
+                      || orders.find(o => o.userId === selectedAccountForDetails.userId);
                     if (!matchedOrder) return null;
                     return (
                       <div className="bg-[#111622]/40 border border-gray-800 rounded-xl p-4 space-y-2 text-xs">
@@ -2666,6 +2751,68 @@ export default function AdminPanel({
                       Close Verification Audit
                     </button>
                   )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* REJECT ORDER WITH REASON MODAL */}
+        {rejectingOrderId && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <div className="bg-[#0A0D14] border border-gray-800 rounded-2xl p-6 max-w-md w-full relative shadow-2xl shadow-red-500/5 overflow-hidden">
+              <button
+                onClick={() => setRejectingOrderId(null)}
+                className="absolute top-4 right-4 text-gray-400 hover:text-white cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="text-left space-y-4">
+                <div>
+                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                    <ShieldAlert className="w-5 h-5 text-red-500" />
+                    <span>Reject Purchase Order</span>
+                  </h3>
+                  <p className="text-xs text-gray-400 mt-1">
+                    Provide the administrative reason for rejecting order <strong className="text-white">{rejectingOrderId}</strong>. This message will be shown directly on the trader's dashboard.
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="block text-[10px] font-mono uppercase tracking-wider text-gray-500 font-bold">
+                    Rejection Reason / Feedback Box
+                  </label>
+                  <textarea
+                    rows={4}
+                    value={rejectionReasonText}
+                    onChange={(e) => setRejectionReasonText(e.target.value)}
+                    placeholder="e.g., Payment screenshot is blurry or invalid. Please upload a clear receipt of your transfer, or contact support."
+                    className="w-full bg-[#111622] border border-gray-800 rounded-xl px-3 py-2 text-xs text-white placeholder-gray-600 focus:outline-none focus:border-red-500/50 transition-all resize-none font-sans"
+                  />
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <button
+                    onClick={() => setRejectingOrderId(null)}
+                    className="flex-1 bg-[#111622] hover:bg-[#111622]/80 border border-gray-800 text-white py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (!rejectionReasonText.trim()) {
+                        alert('Please provide a rejection reason so the trader knows what to fix.');
+                        return;
+                      }
+                      onRejectOrder(rejectingOrderId, rejectionReasonText.trim());
+                      setRejectingOrderId(null);
+                    }}
+                    className="flex-1 bg-red-600 hover:bg-red-500 text-white py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1 cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                    <span>Reject Order</span>
+                  </button>
                 </div>
               </div>
             </div>

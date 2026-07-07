@@ -490,120 +490,58 @@ export function initFirebaseFetch() {
           createdAt: new Date().toISOString()
         };
 
-        if (order.challengeConfigId === 'free_account' || order.finalPrice === 0) {
-          order.status = 'approved';
-
-          if (order.isReset && order.resetAccountId) {
-            const accSnap = await getDoc(doc(db, 'accounts', order.resetAccountId));
-            if (accSnap.exists()) {
-              const acc = accSnap.data() as Account;
-              await updateDoc(doc(db, 'accounts', acc.id), {
-                status: 'active',
-                breachedReason: '',
-                balance: acc.initialBalance,
-                peakBalance: acc.initialBalance,
-                startOfDayBalance: acc.initialBalance,
-                resetsCount: (acc.resetsCount || 0) + 1
-              });
-
-              const logRef = doc(collection(db, 'accountLogs'));
-              await setDoc(logRef, {
-                id: logRef.id,
-                accountId: acc.id,
-                message: `Account balance and metrics reset successfully via Free Reset option.`,
-                type: 'success',
-                timestamp: new Date().toISOString()
-              });
-            }
-          } else {
-            const dailyLimit = Math.round(order.challengeSize * 0.05);
-            const maxLimit = Math.round(order.challengeSize * 0.10);
-            const newAccount: Account = {
-              id: accountId,
-              userId: order.userId,
-              userEmail: order.userEmail,
-              userName: order.userName,
-              challengeConfigId: order.challengeConfigId,
-              challengeName: order.challengeName,
-              challengeSize: order.challengeSize,
-              type: order.challengeConfigId.includes('os') ? 'one_step' : 'two_step',
-              status: 'active',
-              phase: 'phase1',
-              balance: order.challengeSize,
-              initialBalance: order.challengeSize,
-              peakBalance: order.challengeSize,
-              startOfDayBalance: order.challengeSize,
-              dailyDrawdownLimitValue: dailyLimit,
-              maxDrawdownLimitValue: maxLimit,
-              payoutSharePercent: 80,
-              createdAt: new Date().toISOString(),
-              warningsCount: 0
-            };
-            await setDoc(doc(db, 'accounts', accountId), newAccount);
+        // All accounts and resets now require manual admin approval and activation.
+        if (order.isReset && order.resetAccountId) {
+          const accSnap = await getDoc(doc(db, 'accounts', order.resetAccountId));
+          if (accSnap.exists()) {
+            await updateDoc(doc(db, 'accounts', order.resetAccountId), {
+              status: 'pending_payment'
+            });
 
             const logRef = doc(collection(db, 'accountLogs'));
             await setDoc(logRef, {
               id: logRef.id,
-              accountId: accountId,
-              message: `Challenge activated successfully! Free Demo Evaluation started.`,
-              type: 'success',
+              accountId: order.resetAccountId,
+              message: `Account reset order submitted. Pending manual admin verification and activation.`,
+              type: 'info',
               timestamp: new Date().toISOString()
             });
           }
         } else {
-          // Requires paid manual payment approval
-          if (order.isReset && order.resetAccountId) {
-            const accSnap = await getDoc(doc(db, 'accounts', order.resetAccountId));
-            if (accSnap.exists()) {
-              await updateDoc(doc(db, 'accounts', order.resetAccountId), {
-                status: 'pending_payment'
-              });
+          const dailyLimit = Math.round(order.challengeSize * 0.05);
+          const maxLimit = Math.round(order.challengeSize * 0.10);
+          const newAccount: Account = {
+            id: accountId,
+            userId: order.userId,
+            userEmail: order.userEmail,
+            userName: order.userName,
+            challengeConfigId: order.challengeConfigId,
+            challengeName: order.challengeName,
+            challengeSize: order.challengeSize,
+            type: order.challengeConfigId.includes('os') ? 'one_step' : 'two_step',
+            status: 'pending_payment',
+            phase: 'phase1',
+            balance: order.challengeSize,
+            initialBalance: order.challengeSize,
+            peakBalance: order.challengeSize,
+            startOfDayBalance: order.challengeSize,
+            dailyDrawdownLimitValue: dailyLimit,
+            maxDrawdownLimitValue: maxLimit,
+            payoutSharePercent: 80,
+            createdAt: new Date().toISOString(),
+            warningsCount: 0
+          };
+          await setDoc(doc(db, 'accounts', accountId), newAccount);
 
-              const logRef = doc(collection(db, 'accountLogs'));
-              await setDoc(logRef, {
-                id: logRef.id,
-                accountId: order.resetAccountId,
-                message: `Account reset order submitted. Pending manual payment verification of $${order.finalPrice}.`,
-                type: 'info',
-                timestamp: new Date().toISOString()
-              });
-            }
-          } else {
-            const dailyLimit = Math.round(order.challengeSize * 0.05);
-            const maxLimit = Math.round(order.challengeSize * 0.10);
-            const newAccount: Account = {
-              id: accountId,
-              userId: order.userId,
-              userEmail: order.userEmail,
-              userName: order.userName,
-              challengeConfigId: order.challengeConfigId,
-              challengeName: order.challengeName,
-              challengeSize: order.challengeSize,
-              type: order.challengeConfigId.includes('os') ? 'one_step' : 'two_step',
-              status: 'pending_payment',
-              phase: 'phase1',
-              balance: order.challengeSize,
-              initialBalance: order.challengeSize,
-              peakBalance: order.challengeSize,
-              startOfDayBalance: order.challengeSize,
-              dailyDrawdownLimitValue: dailyLimit,
-              maxDrawdownLimitValue: maxLimit,
-              payoutSharePercent: 80,
-              createdAt: new Date().toISOString(),
-              warningsCount: 0
-            };
-            await setDoc(doc(db, 'accounts', accountId), newAccount);
-
-            const logRef = doc(collection(db, 'accountLogs'));
-            await setDoc(logRef, {
-              id: logRef.id,
-              accountId: accountId,
-              message: `Account created successfully with receipt ID. Pending manual admin verification and activation.`,
-              type: 'info',
-              timestamp: new Date().toISOString()
-            });
-            order.accountId = accountId;
-          }
+          const logRef = doc(collection(db, 'accountLogs'));
+          await setDoc(logRef, {
+            id: logRef.id,
+            accountId: accountId,
+            message: `Account created successfully with ID ${accountId}. Pending manual admin verification and activation.`,
+            type: 'info',
+            timestamp: new Date().toISOString()
+          });
+          order.accountId = accountId;
         }
 
         await setDoc(doc(db, 'orders', order.id), order);
@@ -700,19 +638,21 @@ export function initFirebaseFetch() {
 
         if (orderSnap.exists()) {
           const ord = orderSnap.data() as Order;
-          await updateDoc(orderRef, { status: 'rejected' });
+          const reqReason = body.reason || body.rejectionReason || 'Order rejected / Payment verification failed.';
+          await updateDoc(orderRef, { status: 'rejected', rejectionReason: reqReason });
 
           if (ord.accountId) {
             await updateDoc(doc(db, 'accounts', ord.accountId), {
               status: 'breached',
-              breachedReason: 'Order rejected / Payment verification failed.'
+              breachedReason: reqReason,
+              rejectionReason: reqReason
             });
 
             const logRef = doc(collection(db, 'accountLogs'));
             await setDoc(logRef, {
               id: logRef.id,
               accountId: ord.accountId,
-              message: `Payment verification rejected by administrative audit. Account suspended.`,
+              message: `Payment verification rejected: ${reqReason}`,
               type: 'danger',
               timestamp: new Date().toISOString()
             });
