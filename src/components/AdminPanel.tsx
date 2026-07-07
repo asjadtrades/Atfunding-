@@ -111,7 +111,10 @@ export default function AdminPanel({
        });
        const data = await res.json();
        if (!res.ok) {
-         throw new Error(data.error || 'Failed to create giveaway');
+         throw new Error(data?.error || 'Failed to create giveaway');
+       }
+       if (!data || !data.account) {
+         throw new Error('Giveaway API returned a success status but did not include the active account details.');
        }
        setGiveawaySuccess(`🎉 Success! Giveaway account ${data.account.id} ($${data.account.challengeSize.toLocaleString()}) has been granted and activated for ${data.account.userEmail}.`);
        setGiveawayEmail('');
