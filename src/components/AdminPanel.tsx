@@ -1903,14 +1903,31 @@ export default function AdminPanel({
                       onChange={(e) => setGiveawayConfigId(e.target.value)}
                       className="w-full bg-[#05070B] border border-gray-800 focus:border-amber-500/50 rounded-xl px-4 py-2.5 text-xs text-white outline-none transition-all cursor-pointer font-mono"
                     >
-                      <option value="os-5k">One-Step - $5,000 Plan</option>
-                      <option value="os-10k">One-Step - $10,000 Plan</option>
-                      <option value="ts-5k">Two-Step - $5,000 Plan</option>
-                      <option value="ts-10k">Two-Step - $10,000 Plan</option>
-                      <option value="inst-1k">Instant Funded - $1,000 Plan</option>
-                      <option value="inst-2k">Instant Funded - $2,000 Plan</option>
-                      <option value="ppl-5k">Pass Pay Later - $5,000 Plan</option>
-                      <option value="ppl-10k">Pass Pay Later - $10,000 Plan</option>
+                      <optgroup label="One-Step Challenges" className="bg-[#05070B]">
+                        <option value="os-5k">One-Step - $5,000 Plan</option>
+                        <option value="os-10k">One-Step - $10,000 Plan</option>
+                        <option value="os-25k">One-Step - $25,000 Plan</option>
+                        <option value="os-50k">One-Step - $50,000 Plan</option>
+                        <option value="os-100k">One-Step - $100,000 Plan</option>
+                      </optgroup>
+                      <optgroup label="Two-Step Challenges" className="bg-[#05070B]">
+                        <option value="ts-5k">Two-Step - $5,000 Plan</option>
+                        <option value="ts-10k">Two-Step - $10,000 Plan</option>
+                        <option value="ts-25k">Two-Step - $25,000 Plan</option>
+                        <option value="ts-50k">Two-Step - $50,000 Plan</option>
+                        <option value="ts-100k">Two-Step - $100,000 Plan</option>
+                      </optgroup>
+                      <optgroup label="Instant Funded" className="bg-[#05070B]">
+                        <option value="inst-1k">Instant Funded - $1,000 Plan</option>
+                        <option value="inst-2k">Instant Funded - $2,000 Plan</option>
+                      </optgroup>
+                      <optgroup label="Pass Pay Later" className="bg-[#05070B]">
+                        <option value="ppl-5k">Pass Pay Later - $5,000 Plan</option>
+                        <option value="ppl-10k">Pass Pay Later - $10,000 Plan</option>
+                        <option value="ppl-25k">Pass Pay Later - $25,000 Plan</option>
+                        <option value="ppl-50k">Pass Pay Later - $50,000 Plan</option>
+                        <option value="ppl-100k">Pass Pay Later - $100,000 Plan</option>
+                      </optgroup>
                     </select>
                   </div>
 

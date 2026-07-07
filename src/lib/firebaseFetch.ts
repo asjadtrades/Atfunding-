@@ -1060,33 +1060,100 @@ export function initFirebaseFetch() {
       // POST /api/admin/giveaway
       // ----------------------------------------------------
       if (path === '/api/admin/giveaway' && method === 'POST') {
-        const { balance, type } = body;
-        const accsSnap = await getDocs(collection(db, 'accounts'));
+        const { email, challengeConfigId, name } = body;
+        const normalizedEmail = (email || '').toLowerCase().trim();
 
-        for (const d of accsSnap.docs) {
-          const acc = d.data() as Account;
-          if (acc.status === 'active' && (type === 'all' || acc.type === type)) {
-            const addAmt = parseFloat(balance);
-            const newBal = parseFloat((acc.balance + addAmt).toFixed(2));
-
-            await updateDoc(doc(db, 'accounts', acc.id), {
-              balance: newBal,
-              peakBalance: Math.max(acc.peakBalance, newBal),
-              startOfDayBalance: newBal
-            });
-
-            // Log
-            const logRef = doc(collection(db, 'accountLogs'));
-            await setDoc(logRef, {
-              id: logRef.id,
-              accountId: acc.id,
-              message: `Received administrative promotional credit of $${addAmt.toLocaleString()} directly into balance.`,
-              type: 'success',
-              timestamp: new Date().toISOString()
-            });
-          }
+        if (!normalizedEmail) {
+          return new Response(JSON.stringify({ error: 'Recipient email is required' }), { status: 400 });
         }
-        return new Response(JSON.stringify({ success: true }), { status: 200 });
+
+        // 1. Find or create the User
+        const userQuerySnap = await getDocs(query(collection(db, 'users'), where('email', '==', normalizedEmail)));
+        let targetUser: User;
+        
+        if (userQuerySnap.docs.length > 0) {
+          targetUser = userQuerySnap.docs[0].data() as User;
+        } else {
+          // Auto-generate registered user if not exists
+          const newUserId = `usr-${Math.floor(100000 + Math.random() * 900000)}`;
+          targetUser = {
+            id: newUserId,
+            email: normalizedEmail,
+            name: name || 'Giveaway Trader',
+            role: 'user',
+            kycStatus: 'none',
+            createdAt: new Date().toISOString()
+          };
+          await setDoc(doc(db, 'users', newUserId), targetUser);
+        }
+
+        // 2. Find the plan configuration
+        const plan = CHALLENGES.find(c => c.id === challengeConfigId);
+        if (!plan) {
+          return new Response(JSON.stringify({ error: `Challenge configuration '${challengeConfigId}' not found.` }), { status: 400 });
+        }
+
+        // 3. Create the Account (Active)
+        const accountId = `ACC-${Math.floor(100000 + Math.random() * 900000)}`;
+        const dailyLimit = Math.round(plan.size * (plan.dailyDrawdownLimitPercent / 100));
+        const maxLimit = Math.round(plan.size * (plan.maxDrawdownLimitPercent / 100));
+
+        const newAccount: Account = {
+          id: accountId,
+          userId: targetUser.id,
+          userEmail: targetUser.email,
+          userName: targetUser.name,
+          challengeConfigId: plan.id,
+          challengeName: plan.name,
+          challengeSize: plan.size,
+          type: plan.type as any, // 'one_step' | 'two_step' | 'instant' | 'pass_pay_later'
+          status: 'active',
+          phase: plan.type === 'instant' ? 'funded' : 'phase1',
+          balance: plan.size,
+          initialBalance: plan.size,
+          peakBalance: plan.size,
+          startOfDayBalance: plan.size,
+          dailyDrawdownLimitValue: dailyLimit,
+          maxDrawdownLimitValue: maxLimit,
+          payoutSharePercent: plan.payoutSharePercent || 80,
+          createdAt: new Date().toISOString(),
+          warningsCount: 0
+        };
+
+        await setDoc(doc(db, 'accounts', accountId), newAccount);
+
+        // 4. Create an audit trail order (GIVEAWAY coupon)
+        const orderId = `ORD-${Math.floor(100000 + Math.random() * 900000)}`;
+        const order: Order = {
+          id: orderId,
+          userId: targetUser.id,
+          userEmail: targetUser.email,
+          userName: targetUser.name,
+          challengeConfigId: plan.id,
+          challengeName: plan.name,
+          challengeSize: plan.size,
+          amount: plan.price,
+          couponUsed: 'GIVEAWAY',
+          discount: plan.price,
+          finalPrice: 0,
+          status: 'approved',
+          createdAt: new Date().toISOString(),
+          accountId: accountId
+        };
+
+        await setDoc(doc(db, 'orders', order.id), order);
+
+        // 5. Create an initial account log
+        const logRef = doc(collection(db, 'accountLogs'));
+        await setDoc(logRef, {
+          id: logRef.id,
+          accountId: accountId,
+          message: `🎉 Giveaway challenge activated by Administrator! Evaluation started.`,
+          type: 'success',
+          timestamp: new Date().toISOString()
+        });
+
+        return new Response(JSON.stringify({ success: true, account: newAccount }), { status: 200 });
       }
 
       // ----------------------------------------------------
