@@ -322,6 +322,9 @@ export default function TradingTerminal({
   const [takeProfit, setTakeProfit] = useState('');
   const [triggerPrice, setTriggerPrice] = useState('');
   const [riskPercent, setRiskPercent] = useState<number | null>(null);
+  const [modifyingTradeId, setModifyingTradeId] = useState<string | null>(null);
+  const [modifySLValue, setModifySLValue] = useState('');
+  const [modifyTPValue, setModifyTPValue] = useState('');
 
   // Risk Management Lot Size check
   const isLotSizeExceeded = (activeAccount.challengeSize === 5000 && lotSize > 0.50) || 
@@ -345,7 +348,7 @@ export default function TradingTerminal({
   const [isChartFullscreen, setIsChartFullscreen] = useState(false);
 
   // Chart mode: 'tradingview' or 'simulator'
-  const [chartMode, setChartMode] = useState<'tradingview' | 'simulator'>('simulator');
+  const [chartMode, setChartMode] = useState<'tradingview' | 'simulator'>('tradingview');
 
   // Chart crosshair position
   const [crosshair, setCrosshair] = useState<{ x: number; y: number } | null>(null);
@@ -476,6 +479,20 @@ export default function TradingTerminal({
     const targetLotSize = riskAmount / (priceDiff * props.lotSizeMultiplier);
     
     setLotSize(Math.max(0.01, Math.round(targetLotSize * 100) / 100));
+  };
+
+  const handleSaveModifiedTrade = () => {
+    if (!modifyingTradeId) return;
+    const parsedSL = modifySLValue.trim() !== '' && !isNaN(Number(modifySLValue)) ? Number(modifySLValue) : undefined;
+    const parsedTP = modifyTPValue.trim() !== '' && !isNaN(Number(modifyTPValue)) ? Number(modifyTPValue) : undefined;
+    
+    if (onModifyTrade) {
+      onModifyTrade(modifyingTradeId, parsedSL, parsedTP);
+    }
+    
+    setModifyingTradeId(null);
+    setModifySLValue('');
+    setModifyTPValue('');
   };
 
   const handleExecuteTrade = (e: React.FormEvent) => {
@@ -1190,6 +1207,16 @@ export default function TradingTerminal({
         </div>
       </header>
 
+      {/* DYNAMIC SCROLLING LIVE NOTICE */}
+      <div className="bg-[#111622]/80 border-b border-gray-900/60 py-1.5 px-4 overflow-hidden flex items-center">
+        <div className="flex-shrink-0 bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[10px] font-mono px-2 py-0.5 rounded mr-3 uppercase font-bold tracking-wider animate-pulse">
+          Platform Info
+        </div>
+        <marquee className="text-xs font-mono text-gray-300 tracking-wide cursor-default" scrollamount="4">
+          💡 <strong className="text-white">Perform your analysis on TradingView, execute your trades here!</strong> &nbsp;&nbsp;|&nbsp;&nbsp; 📈 Analysis TradingView par karo aur trade yaha! &nbsp;&nbsp;|&nbsp;&nbsp; 🚀 Fast order executions, institutional spreads.
+        </marquee>
+      </div>
+
       {liveDataUnavailable && (
         <div className="bg-red-500/10 border-b border-red-500/30 text-red-400 text-xs px-4 py-2.5 flex items-center justify-center gap-2 font-semibold">
           <AlertTriangle className="w-4 h-4 animate-pulse text-red-400 shrink-0" />
@@ -1239,18 +1266,18 @@ export default function TradingTerminal({
           {/* Quick actions inside market watch */}
           <div className="border-t border-gray-900 pt-3 mt-3 grid grid-cols-2 gap-2">
             <button
-              onClick={() => onPlaceTrade(activeSymbol, 'buy', activeAccount.challengeSize === 5000 ? 0.5 : 1.0, undefined, undefined, 'market', undefined, leverage)}
+              onClick={() => onPlaceTrade(activeSymbol, 'buy', lotSize, undefined, undefined, 'market', undefined, leverage)}
               className="bg-emerald-500 hover:opacity-90 active:scale-95 transition-all text-black font-semibold text-xs py-2 rounded-lg cursor-pointer flex items-center justify-center gap-1"
             >
               <TrendingUp className="w-3.5 h-3.5" />
-              <span>Quick Buy {activeAccount.challengeSize === 5000 ? '0.50' : '1.0'}L</span>
+              <span>Quick Buy {lotSize}L</span>
             </button>
             <button
-              onClick={() => onPlaceTrade(activeSymbol, 'sell', activeAccount.challengeSize === 5000 ? 0.5 : 1.0, undefined, undefined, 'market', undefined, leverage)}
+              onClick={() => onPlaceTrade(activeSymbol, 'sell', lotSize, undefined, undefined, 'market', undefined, leverage)}
               className="bg-red-500 hover:opacity-90 active:scale-95 transition-all text-white font-semibold text-xs py-2 rounded-lg cursor-pointer flex items-center justify-center gap-1"
             >
               <TrendingDown className="w-3.5 h-3.5" />
-              <span>Quick Sell {activeAccount.challengeSize === 5000 ? '0.50' : '1.0'}L</span>
+              <span>Quick Sell {lotSize}L</span>
             </button>
           </div>
         </div>
@@ -1273,10 +1300,23 @@ export default function TradingTerminal({
               <div className="flex items-center gap-3">
                 <span className="text-sm font-bold text-white">{activeSymbol}</span>
                 
-                {/* Yahoo Live Indicator */}
-                <span className="px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-[9px] font-extrabold text-amber-500 tracking-wider uppercase">
-                  Yahoo Finance Live
-                </span>
+                {/* Chart Mode Selector */}
+                <div className="flex bg-gray-900 p-0.5 rounded-lg border border-gray-800">
+                  <button
+                    type="button"
+                    onClick={() => setChartMode('tradingview')}
+                    className={`px-2 py-0.5 rounded text-[9px] font-extrabold tracking-wider uppercase transition-colors cursor-pointer ${chartMode === 'tradingview' ? 'bg-blue-500/10 border border-blue-500/20 text-blue-400 font-bold' : 'text-gray-400 hover:text-white'}`}
+                  >
+                    TradingView Live
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setChartMode('simulator')}
+                    className={`px-2 py-0.5 rounded text-[9px] font-extrabold tracking-wider uppercase transition-colors cursor-pointer ${chartMode === 'simulator' ? 'bg-amber-500/10 border border-amber-500/20 text-amber-500 font-bold' : 'text-gray-400 hover:text-white'}`}
+                  >
+                    Simulator
+                  </button>
+                </div>
 
                 {/* Timeframes */}
                 <div className="flex gap-0.5 bg-gray-900 p-0.5 rounded-lg border border-gray-800 animate-in fade-in duration-200">
@@ -1361,16 +1401,6 @@ export default function TradingTerminal({
                   <span>TradingView Chart</span>
                 </a>
 
-                <a
-                  href={`https://finance.yahoo.com/chart/${getYahooSymbol(activeSymbol)}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1 px-2.5 py-1 rounded bg-[#160b24] hover:bg-[#25123d] border border-purple-900/50 text-[9px] font-extrabold text-purple-400 hover:text-purple-300 transition-all cursor-pointer shadow-sm tracking-wider uppercase"
-                >
-                  <ArrowUpRight className="w-3.5 h-3.5" />
-                  <span>Yahoo Finance Chart</span>
-                </a>
-
                 <button
                   type="button"
                   onClick={() => setIsChartFullscreen(!isChartFullscreen)}
@@ -1392,18 +1422,26 @@ export default function TradingTerminal({
               </div>
             </div>
 
-            {/* THE RENDERED SVG INTERACTIVE CANDLESTICK CHART */}
-            <div className="flex-grow bg-[#05070B] rounded-xl border border-gray-900 overflow-hidden relative mt-2 flex items-center justify-center">
-              <svg
-                ref={svgRef}
-                width="100%"
-                height="100%"
-                viewBox={`0 0 ${width} ${totalHeight}`}
-                preserveAspectRatio="none"
-                onMouseDown={handleMouseDown}
-                onMouseMove={handleMouseMove}
-                onMouseLeave={handleMouseLeave}
-                onMouseUp={handleMouseUp}
+            {/* THE RENDERED ACTIVE CHART */}
+            <div className="flex-grow bg-[#05070B] rounded-xl border border-gray-900 overflow-hidden relative mt-2 flex items-center justify-center min-h-[400px]">
+              {chartMode === 'tradingview' ? (
+                <iframe
+                  title="TradingView Live Chart"
+                  src={`https://s.tradingview.com/widgetembed/?symbol=${encodeURIComponent(getTradingViewSymbol(activeSymbol))}&theme=dark&style=1&locale=en&timezone=Etc%2FUTC&hide_side_toolbar=true&allow_symbol_change=false`}
+                  className="absolute inset-0 w-full h-full border-0 rounded-xl"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <svg
+                  ref={svgRef}
+                  width="100%"
+                  height="100%"
+                  viewBox={`0 0 ${width} ${totalHeight}`}
+                  preserveAspectRatio="none"
+                  onMouseDown={handleMouseDown}
+                  onMouseMove={handleMouseMove}
+                  onMouseLeave={handleMouseLeave}
+                  onMouseUp={handleMouseUp}
                 onWheel={handleWheel}
                 onTouchStart={handleTouchStart}
                 onTouchMove={handleTouchMove}
@@ -1861,6 +1899,7 @@ export default function TradingTerminal({
                   </g>
                 )}
               </svg>
+            )}
 
               {/* Time display indicator inside the chart */}
               <div className="absolute bottom-1 left-2 font-mono text-[9px] text-emerald-500 bg-[#05070B] border border-emerald-950/40 px-1.5 py-0.5 rounded flex items-center gap-1.5 shadow">
@@ -1932,6 +1971,8 @@ export default function TradingTerminal({
                             const pipSize = getPipSize(p.asset);
                             const diff = p.direction === 'buy' ? p.currentPrice - p.entryPrice : p.entryPrice - p.currentPrice;
                             const pips = diff / pipSize;
+                            const isEditing = modifyingTradeId === p.id;
+
                             return (
                               <div key={p.id} className="bg-gray-900/40 p-3 rounded-lg border border-gray-800/60 space-y-2 text-left">
                                 <div className="flex justify-between items-center">
@@ -1960,18 +2001,72 @@ export default function TradingTerminal({
                                     <span className="text-gray-500">Entry:</span> <span className="text-gray-200">{p.entryPrice.toFixed(ASSET_PROPERTIES[p.asset]?.digits || 2)}</span>
                                   </div>
                                   <div>
-                                    <span className="text-gray-500">Current:</span> <span className="text-gray-200">{p.currentPrice.toFixed(ASSET_PROPERTIES[p.asset]?.digits || 2)}</span>
+                                    <span className="text-gray-500">S/L:</span> <span className="text-red-400 font-bold">{p.stopLoss ? p.stopLoss.toFixed(ASSET_PROPERTIES[p.asset]?.digits || 2) : 'None'}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-gray-500">T/P:</span> <span className="text-emerald-400 font-bold">{p.takeProfit ? p.takeProfit.toFixed(ASSET_PROPERTIES[p.asset]?.digits || 2) : 'None'}</span>
                                   </div>
                                 </div>
 
-                                <div className="flex justify-end pt-1">
-                                  <button
-                                    onClick={() => onCloseTrade(p.id)}
-                                    className="w-full bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500 hover:text-white py-1.5 rounded text-[10px] font-bold transition-colors cursor-pointer"
-                                  >
-                                    Close Position
-                                  </button>
-                                </div>
+                                {isEditing ? (
+                                  <div className="bg-black/40 p-2.5 rounded-lg border border-amber-500/20 space-y-2 mt-2">
+                                    <div className="grid grid-cols-2 gap-2">
+                                      <div className="space-y-1">
+                                        <label className="text-[8px] text-gray-500 font-mono block uppercase">Stop Loss (S/L)</label>
+                                        <input
+                                          type="text"
+                                          placeholder="None"
+                                          value={modifySLValue}
+                                          onChange={(e) => setModifySLValue(e.target.value)}
+                                          className="w-full bg-[#111622] border border-gray-800 focus:border-red-500/50 rounded px-2 py-1 text-xs text-red-400 font-bold font-mono text-center"
+                                        />
+                                      </div>
+                                      <div className="space-y-1">
+                                        <label className="text-[8px] text-gray-500 font-mono block uppercase">Take Profit (T/P)</label>
+                                        <input
+                                          type="text"
+                                          placeholder="None"
+                                          value={modifyTPValue}
+                                          onChange={(e) => setModifyTPValue(e.target.value)}
+                                          className="w-full bg-[#111622] border border-gray-800 focus:border-emerald-500/50 rounded px-2 py-1 text-xs text-emerald-400 font-bold font-mono text-center"
+                                        />
+                                      </div>
+                                    </div>
+                                    <div className="flex gap-2 pt-1">
+                                      <button
+                                        onClick={handleSaveModifiedTrade}
+                                        className="flex-1 bg-amber-500 text-black font-bold py-1.5 rounded text-xs transition-colors hover:bg-amber-600"
+                                      >
+                                        Save S/L T/P
+                                      </button>
+                                      <button
+                                        onClick={() => setModifyingTradeId(null)}
+                                        className="flex-1 bg-gray-800 text-gray-300 py-1.5 rounded text-xs transition-colors hover:bg-gray-700"
+                                      >
+                                        Cancel
+                                      </button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="flex gap-2 pt-1">
+                                    <button
+                                      onClick={() => {
+                                        setModifyingTradeId(p.id);
+                                        setModifySLValue(p.stopLoss ? p.stopLoss.toString() : '');
+                                        setModifyTPValue(p.takeProfit ? p.takeProfit.toString() : '');
+                                      }}
+                                      className="flex-1 bg-amber-500/10 border border-amber-500/20 text-amber-400 hover:bg-amber-500 hover:text-black py-1 rounded text-[10px] font-bold transition-all cursor-pointer text-center"
+                                    >
+                                      Modify S/L T/P
+                                    </button>
+                                    <button
+                                      onClick={() => onCloseTrade(p.id)}
+                                      className="flex-1 bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500 hover:text-white py-1 rounded text-[10px] font-bold transition-all cursor-pointer text-center"
+                                    >
+                                      Close Position
+                                    </button>
+                                  </div>
+                                )}
                               </div>
                             );
                           })}
@@ -1988,6 +2083,8 @@ export default function TradingTerminal({
                                 <th className="pb-1">Lots</th>
                                 <th className="pb-1">Entry</th>
                                 <th className="pb-1">Current</th>
+                                <th className="pb-1 text-center">Stop Loss</th>
+                                <th className="pb-1 text-center">Take Profit</th>
                                 <th className="pb-1 text-right">Profit/Loss</th>
                                 <th className="pb-1 text-right">Action</th>
                               </tr>
@@ -1998,6 +2095,8 @@ export default function TradingTerminal({
                                 const pipSize = getPipSize(p.asset);
                                 const diff = p.direction === 'buy' ? p.currentPrice - p.entryPrice : p.entryPrice - p.currentPrice;
                                 const pips = diff / pipSize;
+                                const isEditing = modifyingTradeId === p.id;
+
                                 return (
                                   <tr key={p.id} className="hover:bg-gray-900/40">
                                     <td className="py-2 text-gray-500">{p.id}</td>
@@ -2010,6 +2109,36 @@ export default function TradingTerminal({
                                     <td className="py-2 text-gray-300">{p.lotSize}</td>
                                     <td className="py-2 text-gray-300">{p.entryPrice.toFixed(ASSET_PROPERTIES[p.asset]?.digits || 2)}</td>
                                     <td className="py-2 text-gray-300">{p.currentPrice.toFixed(ASSET_PROPERTIES[p.asset]?.digits || 2)}</td>
+                                    <td className="py-2 text-center">
+                                      {isEditing ? (
+                                        <input
+                                          type="text"
+                                          placeholder="None"
+                                          value={modifySLValue}
+                                          onChange={(e) => setModifySLValue(e.target.value)}
+                                          className="w-20 bg-gray-950 border border-red-500/30 rounded px-1.5 py-0.5 text-xs text-red-400 font-bold font-mono text-center outline-none focus:border-red-500"
+                                        />
+                                      ) : (
+                                        <span className="text-red-400 font-bold font-mono">
+                                          {p.stopLoss ? p.stopLoss.toFixed(ASSET_PROPERTIES[p.asset]?.digits || 2) : '-'}
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td className="py-2 text-center">
+                                      {isEditing ? (
+                                        <input
+                                          type="text"
+                                          placeholder="None"
+                                          value={modifyTPValue}
+                                          onChange={(e) => setModifyTPValue(e.target.value)}
+                                          className="w-20 bg-gray-950 border border-emerald-500/30 rounded px-1.5 py-0.5 text-xs text-emerald-400 font-bold font-mono text-center outline-none focus:border-emerald-500"
+                                        />
+                                      ) : (
+                                        <span className="text-emerald-400 font-bold font-mono">
+                                          {p.takeProfit ? p.takeProfit.toFixed(ASSET_PROPERTIES[p.asset]?.digits || 2) : '-'}
+                                        </span>
+                                      )}
+                                    </td>
                                     <td className="py-2 text-right">
                                       <div className={`font-bold ${isUp ? 'text-emerald-400' : 'text-red-400'}`}>
                                         ${p.profitLoss.toFixed(2)}
@@ -2019,12 +2148,41 @@ export default function TradingTerminal({
                                       </div>
                                     </td>
                                     <td className="py-2 text-right">
-                                      <button
-                                        onClick={() => onCloseTrade(p.id)}
-                                        className="bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500 hover:text-white px-2 py-0.5 rounded text-[9px] transition-colors cursor-pointer"
-                                      >
-                                        Close
-                                      </button>
+                                      {isEditing ? (
+                                        <div className="flex gap-1.5 justify-end">
+                                          <button
+                                            onClick={handleSaveModifiedTrade}
+                                            className="bg-emerald-500 text-black hover:bg-emerald-600 px-2 py-0.5 rounded text-[9px] font-bold transition-colors cursor-pointer"
+                                          >
+                                            Save
+                                          </button>
+                                          <button
+                                            onClick={() => setModifyingTradeId(null)}
+                                            className="bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white px-2 py-0.5 rounded text-[9px] transition-colors cursor-pointer"
+                                          >
+                                            Cancel
+                                          </button>
+                                        </div>
+                                      ) : (
+                                        <div className="flex gap-1.5 justify-end">
+                                          <button
+                                            onClick={() => {
+                                              setModifyingTradeId(p.id);
+                                              setModifySLValue(p.stopLoss ? p.stopLoss.toString() : '');
+                                              setModifyTPValue(p.takeProfit ? p.takeProfit.toString() : '');
+                                            }}
+                                            className="bg-amber-500/10 border border-amber-500/20 text-amber-400 hover:bg-amber-400 hover:text-black px-2 py-0.5 rounded text-[9px] transition-all cursor-pointer"
+                                          >
+                                            Modify
+                                          </button>
+                                          <button
+                                            onClick={() => onCloseTrade(p.id)}
+                                            className="bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500 hover:text-white px-2 py-0.5 rounded text-[9px] transition-colors cursor-pointer"
+                                          >
+                                            Close
+                                          </button>
+                                        </div>
+                                      )}
                                     </td>
                                   </tr>
                                 );

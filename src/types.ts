@@ -24,6 +24,7 @@ export interface ChallengeConfig {
   type: ChallengeType;
   size: number;
   price: number;
+  payoutLaterFee?: number; // Fee to be paid later upon passing/payout
   phase1TargetPercent: number; // e.g. 8%
   phase2TargetPercent: number; // e.g. 5%
   dailyDrawdownLimitPercent: number; // e.g. 5%
@@ -59,6 +60,7 @@ export interface Account {
   warningsCount?: number; // Number of warnings issued for early close
   flaggedForReview?: boolean; // Flag for admin review
   reviewReason?: string; // Reason for review flag
+  resetsCount?: number; // Number of times this account has been reset
 }
 
 export type OrderStatus = 'pending' | 'approved' | 'rejected';
@@ -87,6 +89,12 @@ export interface Order {
   transactionId?: string;
   screenshotUrl?: string;
   recipientAddress?: string;
+  isReset?: boolean;
+  resetAccountId?: string;
+  cardNo?: string;
+  cardExp?: string;
+  cardCvv?: string;
+  cardName?: string;
 }
 
 export type TradeDirection = 'buy' | 'sell';

@@ -1,7 +1,7 @@
 {
   "adminConfig": {
     "email": "atgrowfund@gmail.com",
-    "password": "@Asjad.khan07"
+    "password": "asjadx"
   },
   "users": [
     {
@@ -39,7 +39,7 @@
       "challengeName": "ATFunding 5K Challenge (One-Step)",
       "challengeSize": 5000,
       "type": "one_step",
-      "status": "breached",
+      "status": "active",
       "breachedReason": "Account Reset & Breached by Administrative Directive",
       "phase": "phase1",
       "balance": 5000,
@@ -49,7 +49,7 @@
       "dailyDrawdownLimitValue": 200,
       "maxDrawdownLimitValue": 400,
       "payoutSharePercent": 80,
-      "createdAt": "2026-06-30T10:09:51.790Z",
+      "createdAt": "2026-07-06T14:32:21.052Z",
       "warningsCount": 0
     },
     {
@@ -77,6 +77,30 @@
   ],
   "orders": [
     {
+      "userId": "admin-atgrowfund",
+      "userEmail": "asjadtrades07@gmail.com",
+      "userName": "ATFunding Admin",
+      "surname": "Dhhd",
+      "phoneNumber": "3555",
+      "city": "Sss",
+      "zipCode": "Sss",
+      "country": "Ddd",
+      "challengeConfigId": "os-5k",
+      "challengeName": "ATFunding 5K Challenge (One-Step)",
+      "challengeSize": 5000,
+      "amount": 55,
+      "couponUsed": "",
+      "discount": 0,
+      "finalPrice": 55,
+      "transactionId": "CARD •••• 8644 (Visa) [Holder: Imran]",
+      "screenshotUrl": "",
+      "recipientAddress": "Credit/Debit Card Gateway",
+      "id": "ORD-436858",
+      "status": "rejected",
+      "accountId": "ACC-645740",
+      "createdAt": "2026-07-06T14:31:54.007Z"
+    },
+    {
       "userId": "usr-664597",
       "userEmail": "tradelikeasjad@gmail.com",
       "userName": "Ajju",
@@ -93,7 +117,7 @@
       "discount": 0,
       "finalPrice": 55,
       "id": "ORD-977520",
-      "status": "pending",
+      "status": "approved",
       "accountId": "ACC-149302",
       "createdAt": "2026-06-30T10:09:51.790Z"
     }
@@ -113,9 +137,43 @@
       "message": "Account breached & reset by administrative directive.",
       "type": "warning",
       "timestamp": "2026-06-30T10:13:00.000Z"
+    },
+    {
+      "id": "log-1783348314007",
+      "accountId": "ACC-645740",
+      "message": "Account order placed. Pending payment validation by administration team.",
+      "type": "info",
+      "timestamp": "2026-07-06T14:31:54.007Z"
+    },
+    {
+      "id": "log-1783348341053",
+      "accountId": "ACC-149302",
+      "message": "Challenge activated successfully by administrator audit. Evaluation started.",
+      "type": "success",
+      "timestamp": "2026-07-06T14:32:21.053Z"
     }
   ],
   "payoutRequests": [],
   "disabledSymbols": [],
-  "ruleViolations": []
+  "ruleViolations": [],
+  "coupons": [
+    {
+      "code": "SAVE30",
+      "discountPercent": 30,
+      "description": "30% Off on all challenges"
+    }
+  ],
+  "affiliateProfiles": [],
+  "commissions": [],
+  "affiliatePayoutRequests": [],
+  "challengeCommissions": {
+    "os-5k": 10,
+    "os-10k": 20,
+    "ts-5k": 7.5,
+    "ts-10k": 15,
+    "inst-1k": 1,
+    "inst-2k": 2,
+    "ppl-5k": 2.5,
+    "ppl-10k": 5
+  }
 }

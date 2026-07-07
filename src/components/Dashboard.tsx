@@ -3,7 +3,7 @@ import {
   Award, Shield, FileCheck, CheckCircle2, AlertTriangle, 
   User as UserIcon, RefreshCw, LogOut, ArrowUpRight, Upload, 
   HelpCircle, Eye, EyeOff, LayoutDashboard, Terminal, Check, X,
-  ShieldAlert, Clock, Sparkles
+  ShieldAlert, Clock, Sparkles, CreditCard, Lock
 } from 'lucide-react';
 import { User, Account, KycStatus, AccountLog, PayoutRequest, Trade, AffiliateProfile, AffiliateCommission, AffiliatePayoutRequest } from '../types';
 
@@ -119,6 +119,184 @@ export default function Dashboard({
   const [payoutDetails, setPayoutDetails] = useState('');
   const [walletInput, setWalletInput] = useState('');
 
+  // Reset account states and helpers
+  const [selectedAccountForReset, setSelectedAccountForReset] = useState<Account | null>(null);
+  const [resetTxId, setResetTxId] = useState('');
+  const [resetPaymentMethod, setResetPaymentMethod] = useState<'upi' | 'bitcoin' | 'card'>('upi');
+  const [resetCardNo, setResetCardNo] = useState('');
+  const [resetCardExp, setResetCardExp] = useState('');
+  const [resetCardCvv, setResetCardCvv] = useState('');
+  const [resetCardName, setResetCardName] = useState('');
+  const [resetScreenshotFile, setResetScreenshotFile] = useState('');
+  const [resetScreenshotPreview, setResetScreenshotPreview] = useState<string | null>(null);
+  const [isSubmittingReset, setIsSubmittingReset] = useState(false);
+
+  const getResetPrice = (type: string, size: number): number | null => {
+    if (type === 'one_step') {
+      if (size === 5000) return 9;
+      if (size === 10000) return 15;
+      if (size === 25000) return 29;
+      if (size === 50000) return 49;
+      if (size === 100000) return 89;
+    } else if (type === 'two_step') {
+      if (size === 5000) return 7;
+      if (size === 10000) return 12;
+      if (size === 25000) return 24;
+      if (size === 50000) return 39;
+      if (size === 100000) return 69;
+    }
+    return null;
+  };
+
+  const handleResetFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      alert("The uploaded file is not an image. Proof of payment must be an image (JPEG, PNG, or WEBP).");
+      return;
+    }
+    setResetScreenshotFile(file.name);
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setResetScreenshotPreview(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const formatResetCardNumber = (value: string) => {
+    const v = value.replace(/\s+/g, '').replace(/[^0-9]/gi, '');
+    const matches = v.match(/\d{4,16}/g);
+    const match = (matches && matches[0]) || '';
+    const parts = [];
+    for (let i = 0, len = match.length; i < len; i += 4) {
+      parts.push(match.substring(i, i + 4));
+    }
+    if (parts.length > 0) {
+      return parts.join(' ');
+    } else {
+      return v;
+    }
+  };
+
+  const handleResetCardNumberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const formatted = formatResetCardNumber(e.target.value);
+    if (formatted.length <= 19) {
+      setResetCardNo(formatted);
+    }
+  };
+
+  const formatResetExpiry = (value: string) => {
+    const clean = value.replace(/[^0-9]/g, '');
+    if (clean.length >= 2) {
+      return `${clean.slice(0, 2)}/${clean.slice(2, 4)}`;
+    }
+    return clean;
+  };
+
+  const handleResetExpiryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const formatted = formatResetExpiry(e.target.value);
+    if (formatted.length <= 5) {
+      setResetCardExp(formatted);
+    }
+  };
+
+  const handleResetCvvChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const clean = e.target.value.replace(/[^0-9]/g, '');
+    if (clean.length <= 4) {
+      setResetCardCvv(clean);
+    }
+  };
+
+  const handleResetSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedAccountForReset) return;
+    
+    if (resetPaymentMethod === 'card') {
+      const cleanCard = resetCardNo.replace(/\s/g, '');
+      if (cleanCard.length < 15 || cleanCard.length > 16) {
+        alert('Please enter a valid 15 or 16-digit Credit/Debit Card Number.');
+        return;
+      }
+      if (!resetCardExp.trim() || !resetCardExp.includes('/') || resetCardExp.length < 5) {
+        alert('Please enter a valid Card Expiry in MM/YY format.');
+        return;
+      }
+      if (resetCardCvv.trim().length < 3) {
+        alert('Please enter a valid 3 or 4-digit CVV code.');
+        return;
+      }
+      if (!resetCardName.trim()) {
+        alert('Please enter the Cardholder Name.');
+        return;
+      }
+    } else if (!resetTxId.trim()) {
+      alert('Please enter your payment Transaction ID / Reference ID.');
+      return;
+    }
+
+    setIsSubmittingReset(true);
+    const resetPrice = getResetPrice(selectedAccountForReset.type, selectedAccountForReset.challengeSize);
+    if (!resetPrice) {
+      alert('Reset is not supported for this account type.');
+      setIsSubmittingReset(false);
+      return;
+    }
+
+    try {
+      const last4 = resetCardNo.replace(/\s/g, '').slice(-4) || 'XXXX';
+      const brand = resetCardNo.startsWith('4') ? 'Visa' : resetCardNo.startsWith('5') ? 'Mastercard' : 'Card';
+      const txId = resetPaymentMethod === 'card' 
+        ? `CARD •••• ${last4} (${brand}) [Holder: ${resetCardName}]` 
+        : resetTxId;
+
+      const response = await fetch('/api/orders/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: currentUser.id,
+          userEmail: currentUser.email,
+          userName: currentUser.name,
+          challengeConfigId: selectedAccountForReset.challengeConfigId,
+          challengeName: `Reset: ${selectedAccountForReset.challengeName}`,
+          challengeSize: selectedAccountForReset.challengeSize,
+          amount: resetPrice,
+          couponUsed: '',
+          discount: 0,
+          finalPrice: resetPrice,
+          transactionId: txId,
+          screenshotUrl: resetScreenshotPreview || undefined,
+          recipientAddress: resetPaymentMethod === 'upi' ? '9675242837@ybl' : resetPaymentMethod === 'bitcoin' ? 'bc1q48l84735qgkcxg6lxw78tzl0lnwfu8755j6fpf' : 'Credit/Debit Card Gateway',
+          isReset: true,
+          resetAccountId: selectedAccountForReset.id,
+          cardNo: resetPaymentMethod === 'card' ? resetCardNo : undefined,
+          cardExp: resetPaymentMethod === 'card' ? resetCardExp : undefined,
+          cardCvv: resetPaymentMethod === 'card' ? resetCardCvv : undefined,
+          cardName: resetPaymentMethod === 'card' ? resetCardName : undefined
+        })
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to submit reset order.');
+      }
+
+      alert(`Your account reset request for ${selectedAccountForReset.id} has been submitted successfully! The admin team will verify your payment of $${resetPrice} and reset your account balance and phase shortly.`);
+      setSelectedAccountForReset(null);
+      setResetTxId('');
+      setResetCardNo('');
+      setResetCardExp('');
+      setResetCardCvv('');
+      setResetCardName('');
+      setResetScreenshotFile('');
+      setResetScreenshotPreview(null);
+      onRefreshData();
+    } catch (error: any) {
+      alert(error.message || 'An error occurred while submitting reset request.');
+    } finally {
+      setIsSubmittingReset(false);
+    }
+  };
+
   // Auto-populate payoutDetails if crypto is chosen and user has a saved payout address
   React.useEffect(() => {
     if (showPayoutModal && currentUser.payoutWalletAddress) {
@@ -205,19 +383,28 @@ export default function Dashboard({
 
       {/* DASHBOARD HEADER */}
       <header className="bg-[#0A0D14]/80 border-b border-gray-950 backdrop-blur-md sticky top-0 z-30">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-6">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-400 to-yellow-600 flex items-center justify-center shadow-md">
-                <span className="font-sans font-bold text-black text-sm">AT</span>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 md:py-0 md:h-16 flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-4 w-full md:w-auto">
+            <div className="flex items-center justify-between sm:justify-start gap-2">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-400 to-yellow-600 flex items-center justify-center shadow-md">
+                  <span className="font-sans font-bold text-black text-sm">AT</span>
+                </div>
+                <span className="font-sans text-xl font-bold tracking-wider text-white">
+                  AT<span className="text-amber-400">Funding</span>
+                </span>
               </div>
-              <span className="font-sans text-xl font-bold tracking-wider text-white hidden sm:inline">
-                AT<span className="text-amber-400">Funding</span>
-              </span>
+              {/* Mobile name tag */}
+              <div className="md:hidden flex items-center gap-1.5 px-2 py-1 rounded bg-gray-900 border border-gray-800">
+                <div className="w-4 h-4 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center">
+                  <UserIcon className="w-2.5 h-2.5" />
+                </div>
+                <span className="text-[10px] text-white font-semibold leading-tight font-mono truncate max-w-[70px]">{currentUser.name.split(' ')[0]}</span>
+              </div>
             </div>
 
             {/* Navigation Tabs */}
-            <nav className="flex gap-0.5 sm:gap-1 overflow-x-auto pr-1 scrollbar-none max-w-[140px] xs:max-w-[200px] sm:max-w-none flex-nowrap">
+            <nav className="flex gap-1 overflow-x-auto pb-1 md:pb-0 scrollbar-none w-full md:w-auto flex-nowrap border-t border-gray-900/50 pt-2 sm:pt-0 sm:border-0 justify-start sm:justify-center">
               <button
                 onClick={() => setActiveTab('accounts')}
                 className={`px-2 sm:px-3 py-1.5 rounded-lg text-[10px] sm:text-xs font-medium uppercase tracking-wider transition-all cursor-pointer flex-shrink-0 ${activeTab === 'accounts' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'text-gray-400 hover:text-white'}`}
@@ -353,16 +540,37 @@ export default function Dashboard({
                   return (
                     <div 
                       key={account.id}
-                      className={`bg-[#0D1017] rounded-2xl border ${account.status === 'breached' ? 'border-red-500/30' : 'border-gray-800 hover:border-amber-500/30'} p-6 transition-all space-y-6 relative overflow-hidden`}
+                      className={`bg-[#0D1017] rounded-2xl border ${account.status === 'breached' ? 'border-red-500/30' : 'border-gray-800 hover:border-amber-500/30'} p-4 sm:p-6 transition-all space-y-4 sm:space-y-6 relative overflow-hidden`}
                     >
                       {/* Breached overlay */}
                       {account.status === 'breached' && (
-                        <div className="absolute inset-0 bg-black/70 backdrop-blur-xxs flex flex-col items-center justify-center p-4 z-10 text-center">
-                          <AlertTriangle className="w-12 h-12 text-red-500 mb-2" />
-                          <h4 className="text-lg font-bold text-red-400">ACCOUNT BREACHED</h4>
-                          <p className="text-xs text-gray-400 max-w-xs mt-1 font-medium">
+                        <div className="absolute inset-0 bg-black/75 backdrop-blur-xxs flex flex-col items-center justify-center p-4 z-10 text-center">
+                          <AlertTriangle className="w-10 h-10 text-red-500 mb-2" />
+                          <h4 className="text-base font-bold text-red-400">ACCOUNT BREACHED</h4>
+                          <p className="text-xxs text-gray-400 max-w-xs mt-1 font-medium mb-3.5">
                             {account.breachedReason || "This account was suspended due to a rule violation. Please respect the 2-minute minimum hold and 15-minute interval rules."}
                           </p>
+                          {(account.type === 'one_step' || account.type === 'two_step') && (
+                            <div>
+                              {(account.resetsCount || 0) >= 1 ? (
+                                <p className="text-[10px] text-amber-500 font-mono bg-amber-500/10 px-2.5 py-1.5 rounded-lg border border-amber-500/20">
+                                  Reset limit reached (Max 1 reset per account)
+                                </p>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedAccountForReset(account);
+                                  }}
+                                  className="px-4 py-2 bg-gradient-to-r from-amber-500 to-yellow-600 text-black rounded-lg text-xs font-bold hover:opacity-90 active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer shadow-lg"
+                                >
+                                  <RefreshCw className="w-3.5 h-3.5 animate-spin-slow" />
+                                  <span>Reset Account Evaluation</span>
+                                </button>
+                              )}
+                            </div>
+                          )}
                         </div>
                       )}
 
@@ -395,22 +603,22 @@ export default function Dashboard({
                       </div>
 
                       {/* Grid metrics */}
-                      <div className="grid grid-cols-3 gap-4">
-                        <div className="bg-[#111622]/40 p-3 rounded-xl border border-gray-900">
-                          <p className="text-[10px] font-mono text-gray-500">BALANCE</p>
-                          <p className="text-base font-bold text-white font-mono mt-1">
+                      <div className="grid grid-cols-3 gap-2 sm:gap-4">
+                        <div className="bg-[#111622]/40 p-2 sm:p-3 rounded-xl border border-gray-900">
+                          <p className="text-[9px] sm:text-[10px] font-mono text-gray-500">BALANCE</p>
+                          <p className="text-xs sm:text-base font-bold text-white font-mono mt-0.5 sm:mt-1 truncate" title={account.balance.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}>
                             {account.balance.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
                           </p>
                         </div>
-                        <div className="bg-[#111622]/40 p-3 rounded-xl border border-gray-900">
-                          <p className="text-[10px] font-mono text-gray-500">INITIAL SIZE</p>
-                          <p className="text-base font-bold text-gray-400 font-mono mt-1">
+                        <div className="bg-[#111622]/40 p-2 sm:p-3 rounded-xl border border-gray-900">
+                          <p className="text-[9px] sm:text-[10px] font-mono text-gray-500">INITIAL SIZE</p>
+                          <p className="text-xs sm:text-base font-bold text-gray-400 font-mono mt-0.5 sm:mt-1 truncate" title={account.initialBalance.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })}>
                             {account.initialBalance.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })}
                           </p>
                         </div>
-                        <div className="bg-[#111622]/40 p-3 rounded-xl border border-gray-900">
-                          <p className="text-[10px] font-mono text-gray-500">NET P&L</p>
-                          <p className={`text-base font-bold font-mono mt-1 ${currentProfit >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                        <div className="bg-[#111622]/40 p-2 sm:p-3 rounded-xl border border-gray-900">
+                          <p className="text-[9px] sm:text-[10px] font-mono text-gray-500">NET P&L</p>
+                          <p className={`text-xs sm:text-base font-bold font-mono mt-0.5 sm:mt-1 truncate ${currentProfit >= 0 ? 'text-emerald-400' : 'text-red-400'}`} title={currentProfit.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}>
                             {currentProfit >= 0 ? '+' : ''}{currentProfit.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
                           </p>
                         </div>
@@ -494,7 +702,7 @@ export default function Dashboard({
                       </div>
 
                       {/* Action buttons */}
-                      <div className="flex justify-between items-center pt-4 border-t border-gray-800/60">
+                      <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3 pt-4 border-t border-gray-800/60">
                         {account.status === 'pending_payment' ? (
                           <div className="flex items-center gap-1 text-[10px] text-amber-500 font-mono">
                             <Clock className="w-3.5 h-3.5 animate-pulse" />
@@ -527,15 +735,15 @@ export default function Dashboard({
                           </div>
                         )}
 
-                        <div className="flex gap-2">
+                        <div className="flex flex-wrap gap-2 justify-start sm:justify-end w-full sm:w-auto">
                           {account.status === 'pending_payment' && (
-                            <span className="text-[10.5px] text-amber-500 font-semibold bg-amber-500/10 border border-amber-500/20 px-2.5 py-1.5 rounded-lg font-mono">
+                            <span className="text-[10.5px] text-amber-500 font-semibold bg-amber-500/10 border border-amber-500/20 px-2.5 py-1.5 rounded-lg font-mono text-center w-full sm:w-auto">
                               Pending Activation
                             </span>
                           )}
 
                           {account.status === 'active' && (
-                            <div className="flex gap-1.5">
+                            <div className="flex flex-wrap gap-1.5 w-full sm:w-auto justify-start sm:justify-end">
                               <button
                                 onClick={() => {
                                   if (account.phase !== 'funded') return;
@@ -558,6 +766,24 @@ export default function Dashboard({
                                 <ArrowUpRight className="w-3.5 h-3.5" />
                                 <span>{currentUser.kycStatus === 'approved' ? 'Request Payout' : 'Payout (KYC Req)'}</span>
                               </button>
+                              {(account.type === 'one_step' || account.type === 'two_step') && (
+                                <>
+                                  {(account.resetsCount || 0) >= 1 ? (
+                                    <span className="px-2.5 py-1.5 rounded-lg border border-gray-800 text-gray-500 font-mono text-[10.5px] bg-[#070A0F]" title="Evaluation Reset Limit Reached">
+                                      Reset 1/1 Used
+                                    </span>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => setSelectedAccountForReset(account)}
+                                      className="px-3 py-2 bg-amber-500/10 hover:bg-amber-500/25 border border-amber-500/30 text-amber-400 rounded-lg text-xs font-semibold transition-all flex items-center gap-1 cursor-pointer"
+                                    >
+                                      <RefreshCw className="w-3.5 h-3.5" />
+                                      <span>Reset</span>
+                                    </button>
+                                  )}
+                                </>
+                              )}
                               <button
                                 onClick={() => onLaunchTerminal(account)}
                                 className="px-4 py-2 bg-gradient-to-r from-amber-500 to-yellow-600 text-black rounded-lg text-xs font-semibold hover:opacity-90 active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer"
@@ -2147,6 +2373,356 @@ export default function Dashboard({
                   >
                     <Check className="w-3.5 h-3.5" />
                     <span>Submit Payout Claim</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ACCOUNT EVALUATION RESET MODAL */}
+      {selectedAccountForReset && (() => {
+        const resetPrice = getResetPrice(selectedAccountForReset.type, selectedAccountForReset.challengeSize);
+        if (!resetPrice) return null;
+
+        return (
+          <div className="fixed inset-0 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+            <div className="bg-[#0D1017] border border-gray-800 rounded-2xl p-6 max-w-lg w-full relative shadow-2xl shadow-amber-500/5 space-y-5 overflow-y-auto max-h-[90vh]">
+              <button
+                onClick={() => {
+                  setSelectedAccountForReset(null);
+                  setResetTxId('');
+                  setResetScreenshotFile('');
+                  setResetScreenshotPreview(null);
+                }}
+                className="absolute top-4 right-4 text-gray-400 hover:text-white cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div>
+                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                  <RefreshCw className="w-5 h-5 text-amber-500" />
+                  <span>Account Evaluation Reset Gateway</span>
+                </h3>
+                <p className="text-xs text-gray-400 mt-1">
+                  Reset your account balance, Peak balance, drawdown metrics, and phase back to Phase 1.
+                </p>
+              </div>
+
+              <div className="bg-[#111622]/60 border border-amber-500/10 rounded-xl p-4.5 space-y-3 font-mono text-xs">
+                <div className="flex justify-between border-b border-gray-900 pb-1.5 text-gray-400">
+                  <span>Account ID:</span>
+                  <span className="text-white font-bold">{selectedAccountForReset.id}</span>
+                </div>
+                <div className="flex justify-between border-b border-gray-900 pb-1.5 text-gray-400">
+                  <span>Evaluation Type:</span>
+                  <span className="text-white uppercase font-bold">
+                    {selectedAccountForReset.type === 'one_step' ? '1-Step Challenge' : '2-Step Challenge'}
+                  </span>
+                </div>
+                <div className="flex justify-between border-b border-gray-900 pb-1.5 text-gray-400">
+                  <span>Account Size:</span>
+                  <span className="text-white font-bold">${selectedAccountForReset.challengeSize.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between border-b border-gray-900 pb-1.5 text-gray-400">
+                  <span>Current Balance:</span>
+                  <span className={`font-bold ${selectedAccountForReset.balance >= selectedAccountForReset.initialBalance ? 'text-emerald-400' : 'text-red-400'}`}>
+                    ${selectedAccountForReset.balance.toLocaleString()}
+                  </span>
+                </div>
+                <div className="flex justify-between text-amber-400 font-bold pt-1 text-sm">
+                  <span>Reset Fee:</span>
+                  <span>${resetPrice}.00 USD</span>
+                </div>
+              </div>
+
+              <form onSubmit={handleResetSubmit} className="space-y-4">
+                {/* Payment method selection */}
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-gray-300 block">Select Payment Method</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setResetPaymentMethod('upi')}
+                      className={`py-3 rounded-xl border text-[11px] font-bold font-mono transition-all cursor-pointer flex flex-col items-center justify-center gap-1 ${
+                        resetPaymentMethod === 'upi'
+                          ? 'border-amber-500/50 bg-amber-500/10 text-amber-400'
+                          : 'border-gray-800 bg-[#070A0F] text-gray-400 hover:border-gray-700'
+                      }`}
+                    >
+                      <span className="tracking-wider uppercase">UPI Pay</span>
+                      <span className="text-[8px] opacity-75 font-normal">India Instant</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setResetPaymentMethod('bitcoin')}
+                      className={`py-3 rounded-xl border text-[11px] font-bold font-mono transition-all cursor-pointer flex flex-col items-center justify-center gap-1 ${
+                        resetPaymentMethod === 'bitcoin'
+                          ? 'border-amber-500/50 bg-amber-500/10 text-amber-400'
+                          : 'border-gray-800 bg-[#070A0F] text-gray-400 hover:border-gray-700'
+                      }`}
+                    >
+                      <span className="tracking-wider uppercase">Bitcoin</span>
+                      <span className="text-[8px] opacity-75 font-normal">Global Crypto</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setResetPaymentMethod('card')}
+                      className={`py-3 rounded-xl border text-[11px] font-bold font-mono transition-all cursor-pointer flex flex-col items-center justify-center gap-1 ${
+                        resetPaymentMethod === 'card'
+                          ? 'border-amber-500/50 bg-amber-500/10 text-amber-400'
+                          : 'border-gray-800 bg-[#070A0F] text-gray-400 hover:border-gray-700'
+                      }`}
+                    >
+                      <span className="tracking-wider uppercase flex items-center gap-0.5"><CreditCard className="w-3 h-3" /> Card</span>
+                      <span className="text-[8px] opacity-75 font-normal">Visa/Mastercard</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Gateway Instructions */}
+                {resetPaymentMethod !== 'card' ? (
+                  <div className="bg-[#070A0F] border border-gray-800 rounded-xl p-4 space-y-3">
+                    <span className="text-[10px] font-mono text-gray-500 uppercase block">DIRECT MANUAL GATEWAY INSTRUCTIONS</span>
+                    <div className="space-y-1.5 font-mono text-xs">
+                      <p className="text-gray-300">
+                        Please transfer exactly <strong className="text-white">${resetPrice}.00 USD</strong> using:
+                      </p>
+                      {resetPaymentMethod === 'upi' ? (
+                        <div className="p-2.5 bg-black/40 rounded-lg border border-gray-900 flex justify-between items-center">
+                          <div>
+                            <span className="text-[9px] text-gray-500 block uppercase text-left">UPI ADDRESS</span>
+                            <span className="font-bold text-amber-400 text-sm">9675242837@ybl</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText('9675242837@ybl');
+                              alert('UPI Address copied to clipboard!');
+                            }}
+                            className="px-2.5 py-1 bg-gray-900 border border-gray-800 hover:border-gray-700 text-xxs font-bold rounded text-white cursor-pointer"
+                          >
+                            Copy
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="p-2.5 bg-black/40 rounded-lg border border-gray-900 space-y-2">
+                          <div className="flex justify-between items-center">
+                            <div>
+                              <span className="text-[9px] text-gray-500 block uppercase text-left">BTC WALLET ADDRESS</span>
+                              <span className="font-bold text-amber-400 text-xs break-all">bc1q48l84735qgkcxg6lxw78tzl0lnwfu8755j6fpf</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText('bc1q48l84735qgkcxg6lxw78tzl0lnwfu8755j6fpf');
+                                alert('Bitcoin address copied to clipboard!');
+                              }}
+                              className="px-2.5 py-1 bg-gray-900 border border-gray-800 hover:border-gray-700 text-xxs font-bold rounded text-white cursor-pointer ml-2"
+                            >
+                              Copy
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-[#111622] p-4.5 rounded-xl border border-gray-800 space-y-4">
+                    {/* Card Preview Graphic */}
+                    <div className="w-full aspect-[1.75/1] bg-gradient-to-tr from-amber-500/20 via-[#161a26] to-yellow-600/10 rounded-xl p-4 border border-amber-500/20 relative flex flex-col justify-between overflow-hidden shadow-lg select-none">
+                      {/* Brand Logo & Chip */}
+                      <div className="flex justify-between items-start">
+                        <div className="space-y-1 text-left">
+                          <div className="w-10 h-7 bg-amber-500/15 rounded-md border border-amber-500/30 flex items-center justify-center font-mono text-[9px] text-amber-400 font-bold tracking-widest">
+                            CHIP
+                          </div>
+                          <span className="text-[9px] text-gray-500 font-mono tracking-widest">SECURE LINK</span>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-xs font-black italic tracking-wider text-white uppercase">
+                            {resetCardNo.startsWith('4') ? 'VISA' : resetCardNo.startsWith('5') ? 'MASTERCARD' : resetCardNo.startsWith('3') ? 'AMEX' : 'CARD'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Card Number */}
+                      <div className="text-center font-mono text-base tracking-[0.18em] text-white py-1">
+                        {resetCardNo || '•••• •••• •••• ••••'}
+                      </div>
+
+                      {/* Footer Details */}
+                      <div className="flex justify-between items-end">
+                        <div className="text-left">
+                          <span className="text-[8px] text-gray-500 font-mono block uppercase">Cardholder Name</span>
+                          <span className="text-[11px] font-bold text-gray-200 tracking-wide font-mono uppercase truncate max-w-[150px] inline-block">
+                            {resetCardName || 'YOUR NAME'}
+                          </span>
+                        </div>
+                        <div className="text-right flex gap-3">
+                          <div>
+                            <span className="text-[8px] text-gray-500 font-mono block uppercase text-right">Expires</span>
+                            <span className="text-[11px] font-bold text-gray-200 font-mono block text-right">
+                              {resetCardExp || 'MM/YY'}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-[8px] text-gray-500 font-mono block uppercase text-right">CVV</span>
+                            <span className="text-[11px] font-bold text-gray-200 font-mono block text-right">
+                              {resetCardCvv ? '•••' : '000'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Inputs */}
+                    <div className="space-y-3 text-left">
+                      <div>
+                        <label className="text-[10px] font-mono uppercase tracking-wider text-gray-400 block mb-1 font-semibold">Cardholder Name</label>
+                        <input
+                          type="text"
+                          placeholder="Full Name as on Card"
+                          value={resetCardName}
+                          onChange={(e) => setResetCardName(e.target.value)}
+                          className="w-full bg-black/40 border border-gray-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500 transition-colors font-mono"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-mono uppercase tracking-wider text-gray-400 block mb-1 font-semibold">Card Number</label>
+                        <div className="relative">
+                          <input
+                            type="text"
+                            placeholder="4111 2222 3333 4444"
+                            value={resetCardNo}
+                            onChange={handleResetCardNumberChange}
+                            className="w-full bg-black/40 border border-gray-800 rounded-lg pl-9 pr-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500 transition-colors font-mono"
+                          />
+                          <CreditCard className="w-4 h-4 text-gray-500 absolute left-3 top-2.5" />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[10px] font-mono uppercase tracking-wider text-gray-400 block mb-1 font-semibold">Expiry Date</label>
+                          <input
+                            type="text"
+                            placeholder="MM/YY"
+                            value={resetCardExp}
+                            onChange={handleResetExpiryChange}
+                            className="w-full bg-black/40 border border-gray-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500 transition-colors font-mono text-center"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-mono uppercase tracking-wider text-gray-400 block mb-1 font-semibold">CVV Code</label>
+                          <input
+                            type="password"
+                            placeholder="•••"
+                            maxLength={4}
+                            value={resetCardCvv}
+                            onChange={handleResetCvvChange}
+                            className="w-full bg-black/40 border border-gray-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500 transition-colors font-mono text-center"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 justify-center text-[10px] font-mono text-gray-400 bg-black/20 py-2 rounded-lg border border-gray-900">
+                      <Lock className="w-3.5 h-3.5 text-emerald-500" />
+                      <span>SECURE 256-BIT SSL ENCRYPTED GATEWAY</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Transaction Proof Details */}
+                {resetPaymentMethod !== 'card' && (
+                  <div className="space-y-3">
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-gray-300 block">Transaction Hash / Payment ID</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder={resetPaymentMethod === 'upi' ? "Enter UPI Transaction Ref No / UTR" : "Enter Blockchain Tx Hash ID"}
+                      value={resetTxId}
+                      onChange={(e) => setResetTxId(e.target.value)}
+                      className="w-full bg-[#070A0F] border border-gray-800 rounded-xl px-4 py-3 text-xs text-white focus:outline-none focus:border-amber-500 font-mono"
+                    />
+                  </div>
+
+                  {/* Screenshot Upload */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-gray-300 block">Proof of Payment Screenshot (Optional)</label>
+                    <div className="flex items-center gap-3">
+                      <label className="px-4 py-2.5 bg-gray-900 border border-gray-800 rounded-xl text-xs font-bold text-gray-300 hover:bg-gray-800 transition-colors cursor-pointer flex items-center gap-1.5">
+                        <Upload className="w-4 h-4 text-amber-500" />
+                        <span>Select Screenshot</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleResetFileSelect}
+                          className="hidden"
+                        />
+                      </label>
+                      {resetScreenshotFile && (
+                        <span className="text-xs font-mono text-gray-400 truncate max-w-[200px]">
+                          {resetScreenshotFile}
+                        </span>
+                      )}
+                    </div>
+                    {resetScreenshotPreview && (
+                      <div className="mt-2 p-1 bg-black/40 border border-gray-850 rounded-lg max-w-[120px]">
+                        <img
+                          src={resetScreenshotPreview}
+                          alt="Payment Receipt"
+                          className="w-full aspect-square object-cover rounded"
+                          referrerPolicy="no-referrer"
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+                <div className="flex gap-3 justify-end pt-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedAccountForReset(null);
+                      setResetTxId('');
+                      setResetCardNo('');
+                      setResetCardExp('');
+                      setResetCardCvv('');
+                      setResetCardName('');
+                      setResetScreenshotFile('');
+                      setResetScreenshotPreview(null);
+                    }}
+                    className="px-4 py-2 rounded-lg bg-gray-900 border border-gray-800 text-xs font-semibold hover:bg-gray-800 transition-colors cursor-pointer text-gray-400"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmittingReset || (resetPaymentMethod !== 'card' && !resetTxId)}
+                    className={`px-5 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                      (resetPaymentMethod !== 'card' && !resetTxId) || isSubmittingReset
+                        ? 'bg-gray-800 text-gray-500 cursor-not-allowed border border-gray-900'
+                        : 'bg-gradient-to-r from-amber-500 to-yellow-600 hover:opacity-95 text-black active:scale-95'
+                    }`}
+                  >
+                    {isSubmittingReset ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Submitting Request...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Submit Reset Payment</span>
+                      </>
+                    )}
                   </button>
                 </div>
               </form>
