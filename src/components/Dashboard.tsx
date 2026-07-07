@@ -3,8 +3,9 @@ import {
   Award, Shield, FileCheck, CheckCircle2, AlertTriangle, 
   User as UserIcon, RefreshCw, LogOut, ArrowUpRight, Upload, 
   HelpCircle, Eye, EyeOff, LayoutDashboard, Terminal, Check, X,
-  ShieldAlert, Clock, Sparkles, CreditCard, Lock
+  ShieldAlert, Clock, Sparkles, CreditCard, Lock, Download, BookOpen, FileText, CheckSquare
 } from 'lucide-react';
+import { jsPDF } from 'jspdf';
 import { User, Account, KycStatus, AccountLog, PayoutRequest, Trade, AffiliateProfile, AffiliateCommission, AffiliatePayoutRequest } from '../types';
 
 interface DashboardProps {
@@ -371,10 +372,126 @@ export default function Dashboard({
   };
 
   const myAccounts = accounts.filter(acc => 
-    acc.userEmail && 
-    currentUser && 
-    acc.userEmail.toLowerCase().trim() === currentUser.email.toLowerCase().trim()
+    currentUser && (
+      (acc.userId && acc.userId === currentUser.id) ||
+      (acc.userEmail && acc.userEmail.toLowerCase().trim() === currentUser.email.toLowerCase().trim())
+    )
   );
+
+  const downloadRulesPDF = () => {
+    try {
+      const doc = new jsPDF();
+      
+      // Header Banner
+      doc.setFillColor(10, 13, 20); // Deep Dark Slate #0A0D14
+      doc.rect(0, 0, 210, 42, 'F');
+      
+      doc.setTextColor(255, 255, 255);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(22);
+      doc.text('ATFunding Prop Firm', 20, 20);
+      
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.setTextColor(245, 158, 11); // Amber
+      doc.text('OFFICIAL TRADING RULES & COMPLIANCE MANDATES', 20, 28);
+      
+      doc.setTextColor(156, 163, 175);
+      doc.setFontSize(8.5);
+      const dateStr = new Date().toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      });
+      doc.text(`Issued on: ${dateStr} | Trader Authorized Name: ${currentUser?.name || 'Authorized Trader'}`, 20, 35);
+      
+      // Rule 1: Daily Drawdown
+      doc.setFillColor(243, 244, 246);
+      doc.rect(15, 52, 180, 28, 'F');
+      doc.setDrawColor(245, 158, 11);
+      doc.setLineWidth(1);
+      doc.line(15, 52, 15, 80);
+      
+      doc.setTextColor(17, 24, 39);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.text('1. Daily Drawdown Limit (5% Max)', 20, 60);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(75, 85, 99);
+      doc.text('Traders are restricted to a maximum 5% daily loss. The limit is calculated based on the starting balance\nof the day. Violating this threshold results in automated hard breach of the evaluation phase.', 20, 66);
+      
+      // Rule 2: Max Drawdown
+      doc.setFillColor(243, 244, 246);
+      doc.rect(15, 87, 180, 28, 'F');
+      doc.line(15, 87, 15, 115);
+      
+      doc.setTextColor(17, 24, 39);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.text('2. Maximum Cumulative Drawdown (10% Max)', 20, 95);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(75, 85, 99);
+      doc.text('The overall maximum drawdown limit is capped at 10% of the initial account size. This protects\nthe firm\'s reserve capital pool. Exceeding this limit will instantly terminate the challenge.', 20, 101);
+      
+      // Rule 3: Minimum Holding Time
+      doc.setFillColor(243, 244, 246);
+      doc.rect(15, 122, 180, 28, 'F');
+      doc.line(15, 122, 15, 150);
+      
+      doc.setTextColor(17, 24, 39);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.text('3. Minimum Trade Duration (120 Seconds)', 20, 130);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(75, 85, 99);
+      doc.text('Every trade must be held active for at least 120 seconds (2 minutes). Immediate scalp entries\nor high-frequency arbitrage abuse trigger automated warnings and suspension on multiple strikes.', 20, 136);
+      
+      // Rule 4: Cooldown Interval
+      doc.setFillColor(243, 244, 246);
+      doc.rect(15, 157, 180, 28, 'F');
+      doc.line(15, 157, 15, 185);
+      
+      doc.setTextColor(17, 24, 39);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.text('4. Order Cooldown Interval (15 Minutes)', 20, 165);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(75, 85, 99);
+      doc.text('Traders must wait a minimum of 15 minutes between placing consecutive orders to guarantee clean STP\nrouting, prevent high-frequency spam, and maintain steady, institutional-grade risk parameters.', 20, 171);
+      
+      // Phase Target Table / Guidelines
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(17, 24, 39);
+      doc.text('EVALUATION TARGETS SUMMARY:', 15, 198);
+      
+      doc.setFontSize(8.5);
+      doc.setTextColor(75, 85, 99);
+      doc.text('• One-Step Challenge: 10% Profit Target | Leverage up to 1:100\n• Two-Step Challenge Phase 1: 8% Profit Target | 1:100 Leverage\n• Two-Step Challenge Phase 2: 5% Profit Target | 1:100 Leverage\n• Profit Split: Receive 80% of all generated gains once fully funded.', 15, 205);
+      
+      // Footer and verification note
+      doc.setFillColor(10, 13, 20);
+      doc.rect(0, 270, 210, 27, 'F');
+      
+      doc.setTextColor(255, 255, 255);
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(8);
+      doc.text('ATFunding Prop Firm - Secure Institutional Evaluation Platform', 15, 280);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(156, 163, 175);
+      doc.text('Compliance is verified in real-time by our Exness MT5 bridge risk engine.', 15, 285);
+      
+      // Save PDF
+      doc.save(`ATFunding_Trading_Rules_${(currentUser?.name || 'Trader').replace(/\s+/g, '_')}.pdf`);
+    } catch (err) {
+      console.error('PDF Generation Failed:', err);
+      alert('Failed to generate rules PDF. Please try again.');
+    }
+  };
 
   return (
     <div className="min-h-screen bg-[#05070B] text-gray-100 font-sans pb-20">
@@ -505,6 +622,86 @@ export default function Dashboard({
               <p className="text-xs font-mono text-gray-500">
                 ACTIVE ACCOUNTS: <span className="text-white font-bold">{myAccounts.filter(acc => acc.status === 'active').length}</span> / TOTAL: <span className="text-gray-300 font-bold">{myAccounts.length}</span>
               </p>
+            </div>
+
+            {/* COMPLIANCE & TRADING MANDATES BANNER */}
+            <div className="bg-gradient-to-r from-[#0C101B] to-[#080B13] border border-gray-900 rounded-2xl p-5 relative overflow-hidden shadow-xl">
+              <div className="absolute top-0 right-0 w-64 h-64 bg-amber-500/3 rounded-full blur-3xl pointer-events-none" />
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-gray-900/60">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center border border-amber-500/20">
+                    <BookOpen className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                      <span>ATFunding Proprietary Trading Mandates</span>
+                      <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                    </h3>
+                    <p className="text-[11px] text-gray-400">Compliance is monitored automatically in real-time on our Exness MT5 bridge feed.</p>
+                  </div>
+                </div>
+                <button
+                  onClick={downloadRulesPDF}
+                  className="bg-amber-500 hover:bg-amber-600 text-black text-xs font-bold py-2 px-4 rounded-xl transition-all duration-200 active:scale-95 flex items-center gap-2 cursor-pointer shadow-lg shadow-amber-500/10"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Download Rules PDF</span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-4">
+                {/* Rule 1 */}
+                <div className="bg-[#05070B] border border-gray-950 p-4 rounded-xl flex gap-3 items-start relative hover:border-gray-900 transition-colors">
+                  <div className="w-8 h-8 rounded-lg bg-red-500/10 text-red-400 flex items-center justify-center flex-shrink-0 border border-red-500/20">
+                    <ShieldAlert className="w-4 h-4" />
+                  </div>
+                  <div className="space-y-1">
+                    <h4 className="text-xs font-bold text-gray-200 uppercase tracking-wide">Daily Drawdown</h4>
+                    <p className="text-[11px] text-gray-400 leading-relaxed">
+                      <strong className="text-red-400">Max 5% daily loss</strong> calculated from start-of-day equity.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Rule 2 */}
+                <div className="bg-[#05070B] border border-gray-950 p-4 rounded-xl flex gap-3 items-start relative hover:border-gray-900 transition-colors">
+                  <div className="w-8 h-8 rounded-lg bg-orange-500/10 text-orange-400 flex items-center justify-center flex-shrink-0 border border-orange-500/20">
+                    <Shield className="w-4 h-4" />
+                  </div>
+                  <div className="space-y-1">
+                    <h4 className="text-xs font-bold text-gray-200 uppercase tracking-wide">Max Drawdown</h4>
+                    <p className="text-[11px] text-gray-400 leading-relaxed">
+                      <strong className="text-orange-400">Max 10% total loss</strong> based on initial balance.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Rule 3 */}
+                <div className="bg-[#05070B] border border-gray-950 p-4 rounded-xl flex gap-3 items-start relative hover:border-gray-900 transition-colors">
+                  <div className="w-8 h-8 rounded-lg bg-cyan-500/10 text-cyan-400 flex items-center justify-center flex-shrink-0 border border-cyan-500/20">
+                    <Clock className="w-4 h-4" />
+                  </div>
+                  <div className="space-y-1">
+                    <h4 className="text-xs font-bold text-gray-200 uppercase tracking-wide">Min Hold Time</h4>
+                    <p className="text-[11px] text-gray-400 leading-relaxed">
+                      Positions must be held for <strong className="text-cyan-400">at least 120 seconds (2 mins)</strong>.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Rule 4 */}
+                <div className="bg-[#05070B] border border-gray-950 p-4 rounded-xl flex gap-3 items-start relative hover:border-gray-900 transition-colors">
+                  <div className="w-8 h-8 rounded-lg bg-indigo-500/10 text-indigo-400 flex items-center justify-center flex-shrink-0 border border-indigo-500/20">
+                    <Clock className="w-4 h-4" />
+                  </div>
+                  <div className="space-y-1">
+                    <h4 className="text-xs font-bold text-gray-200 uppercase tracking-wide">Order Cooldown</h4>
+                    <p className="text-[11px] text-gray-400 leading-relaxed">
+                      Wait at least <strong className="text-indigo-400">15 minutes</strong> between places.
+                    </p>
+                  </div>
+                </div>
+              </div>
             </div>
 
             {myAccounts.length === 0 ? (
