@@ -1072,7 +1072,15 @@ export function initFirebaseFetch() {
         let targetUser: User;
         
         if (userQuerySnap.docs.length > 0) {
-          targetUser = userQuerySnap.docs[0].data() as User;
+          const docData = userQuerySnap.docs[0].data();
+          targetUser = {
+            id: docData.id || userQuerySnap.docs[0].id || `usr-${Math.floor(100000 + Math.random() * 900000)}`,
+            email: docData.email || normalizedEmail,
+            name: docData.name || name || 'Giveaway Trader',
+            role: docData.role || 'user',
+            kycStatus: docData.kycStatus || 'none',
+            createdAt: docData.createdAt || new Date().toISOString()
+          };
         } else {
           // Auto-generate registered user if not exists
           const newUserId = `usr-${Math.floor(100000 + Math.random() * 900000)}`;
@@ -1100,9 +1108,9 @@ export function initFirebaseFetch() {
 
         const newAccount: Account = {
           id: accountId,
-          userId: targetUser.id,
-          userEmail: targetUser.email,
-          userName: targetUser.name,
+          userId: targetUser.id || `usr-${Math.floor(100000 + Math.random() * 900000)}`,
+          userEmail: targetUser.email || normalizedEmail,
+          userName: targetUser.name || name || 'Giveaway Trader',
           challengeConfigId: plan.id,
           challengeName: plan.name,
           challengeSize: plan.size,
@@ -1126,9 +1134,9 @@ export function initFirebaseFetch() {
         const orderId = `ORD-${Math.floor(100000 + Math.random() * 900000)}`;
         const order: Order = {
           id: orderId,
-          userId: targetUser.id,
-          userEmail: targetUser.email,
-          userName: targetUser.name,
+          userId: newAccount.userId,
+          userEmail: newAccount.userEmail,
+          userName: newAccount.userName,
           challengeConfigId: plan.id,
           challengeName: plan.name,
           challengeSize: plan.size,
