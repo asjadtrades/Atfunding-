@@ -295,7 +295,8 @@ export default function App() {
     takeProfit?: number, 
     orderType: OrderType = 'market', 
     triggerPrice?: number,
-    leverage?: number
+    leverage?: number,
+    currentMarketPrice?: number
   ) => {
     if (!activeTerminalAccount) return;
 
@@ -320,7 +321,8 @@ export default function App() {
           takeProfit,
           orderType,
           triggerPrice,
-          leverage
+          leverage,
+          currentMarketPrice
         })
       });
 

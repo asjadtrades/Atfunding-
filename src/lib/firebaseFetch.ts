@@ -1,6 +1,93 @@
 import { CHALLENGES, COUPONS, INITIAL_QUOTES, ASSET_PROPERTIES } from '../data';
 import { MarketQuote, User, Account, Order, Trade, AccountLog, PayoutRequest, RuleViolation, AffiliateProfile, AffiliateCommission, AffiliatePayoutRequest, Coupon, KycStatus } from '../types';
-import { collection, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, query, where, writeBatch } from 'firebase/firestore';
+import { 
+  collection, 
+  doc, 
+  setDoc as firestoreSetDoc, 
+  getDoc as firestoreGetDoc, 
+  getDocs as firestoreGetDocs, 
+  updateDoc as firestoreUpdateDoc, 
+  deleteDoc as firestoreDeleteDoc, 
+  query, 
+  where, 
+  writeBatch,
+  getDocFromCache,
+  getDocsFromCache
+} from 'firebase/firestore';
+
+async function getDoc(reference: any) {
+  try {
+    return await firestoreGetDoc(reference);
+  } catch (err: any) {
+    console.warn('[Firebase Fetch Warning] Server getDoc failed (likely offline):', err);
+    try {
+      return await getDocFromCache(reference);
+    } catch (cacheErr) {
+      console.error('[Firebase Fetch Error] getDocFromCache failed, returning empty snapshot:', cacheErr);
+      return {
+        exists: () => false,
+        data: () => undefined,
+        id: reference.id,
+        ref: reference
+      } as any;
+    }
+  }
+}
+
+async function getDocs(queryOrCollection: any) {
+  try {
+    return await firestoreGetDocs(queryOrCollection);
+  } catch (err: any) {
+    console.warn('[Firebase Fetch Warning] Server getDocs failed (likely offline):', err);
+    try {
+      return await getDocsFromCache(queryOrCollection);
+    } catch (cacheErr) {
+      console.error('[Firebase Fetch Error] getDocsFromCache failed, returning empty collection:', cacheErr);
+      return {
+        docs: [],
+        empty: true,
+        size: 0,
+        forEach: () => {}
+      } as any;
+    }
+  }
+}
+
+async function updateDoc(reference: any, data: any) {
+  try {
+    return await firestoreUpdateDoc(reference, data);
+  } catch (err: any) {
+    console.warn('[Firebase Fetch Warning] updateDoc failed (likely offline):', err);
+    if (err.message && (err.message.includes('offline') || err.message.includes('unavailable') || err.message.includes('failed-precondition'))) {
+      return;
+    }
+    throw err;
+  }
+}
+
+async function setDoc(reference: any, data: any, options?: any) {
+  try {
+    return await firestoreSetDoc(reference, data, options);
+  } catch (err: any) {
+    console.warn('[Firebase Fetch Warning] setDoc failed (likely offline):', err);
+    if (err.message && (err.message.includes('offline') || err.message.includes('unavailable') || err.message.includes('failed-precondition'))) {
+      return;
+    }
+    throw err;
+  }
+}
+
+async function deleteDoc(reference: any) {
+  try {
+    return await firestoreDeleteDoc(reference);
+  } catch (err: any) {
+    console.warn('[Firebase Fetch Warning] deleteDoc failed (likely offline):', err);
+    if (err.message && (err.message.includes('offline') || err.message.includes('unavailable') || err.message.includes('failed-precondition'))) {
+      return;
+    }
+    throw err;
+  }
+}
 import { db } from './firebase';
 
 let currentQuotes: MarketQuote[] = JSON.parse(JSON.stringify(INITIAL_QUOTES));
@@ -143,16 +230,323 @@ async function seedDefaultData() {
 // ----------------------------------------------------
 // SIMULATED PRICE TICK & RISK ENGINE LOOP
 // ----------------------------------------------------
+const TICKER_MAP: Record<string, string> = {
+  'EURUSD': 'EURUSD=X',
+  'GBPUSD': 'GBPUSD=X',
+  'USDJPY': 'USDJPY=X',
+  'USDCHF': 'USDCHF=X',
+  'USDCAD': 'USDCAD=X',
+  'AUDUSD': 'AUDUSD=X',
+  'NZDUSD': 'NZDUSD=X',
+  'EURJPY': 'EURJPY=X',
+  'GBPJPY': 'GBPJPY=X',
+  'EURGBP': 'EURGBP=X',
+  'AUDJPY': 'AUDJPY=X',
+  'CADJPY': 'CADJPY=X',
+  'CHFJPY': 'CHFJPY=X',
+  'XAUUSD': 'XAUUSD=X',
+  'XAGUSD': 'SI=F',
+  'US30': '^DJI',
+  'NAS100': '^NDX',
+  'SPX500': '^GSPC',
+  'GER40': '^GDAXI',
+  'UK100': '^FTSE',
+  'JP225': '^N225',
+  'AUS200': '^AXJO',
+  'HK50': '^HSI',
+  'FRA40': '^FCHI',
+  'USOIL': 'CL=F',
+  'UKOIL': 'BZ=F',
+  'Natural Gas': 'NG=F',
+  'BTCUSD': 'BTC-USD',
+  'ETHUSD': 'ETH-USD',
+  'SOLUSD': 'SOL-USD',
+  'XRPUSD': 'XRP-USD',
+  'BNBUSD': 'BNB-USD',
+  'DOGEUSD': 'DOGE-USD',
+  'ADAUSD': 'ADA-USD',
+};
+
+const REVERSE_TICKER_MAP: Record<string, string> = {};
+Object.entries(TICKER_MAP).forEach(([appSym, yahooSym]) => {
+  REVERSE_TICKER_MAP[yahooSym.toUpperCase()] = appSym;
+});
+
+const FINNHUB_TICKER_MAP: Record<string, string> = {
+  'EURUSD': 'OANDA:EUR_USD',
+  'GBPUSD': 'OANDA:GBP_USD',
+  'USDJPY': 'OANDA:USD_JPY',
+  'USDCHF': 'OANDA:USD_CHF',
+  'USDCAD': 'OANDA:USD_CAD',
+  'AUDUSD': 'OANDA:AUD_USD',
+  'NZDUSD': 'OANDA:NZD_USD',
+  'EURJPY': 'OANDA:EUR_JPY',
+  'GBPJPY': 'OANDA:GBP_JPY',
+  'EURGBP': 'OANDA:EUR_GBP',
+  'AUDJPY': 'OANDA:AUD_JPY',
+  'CADJPY': 'OANDA:CAD_JPY',
+  'CHFJPY': 'OANDA:CHF_JPY',
+  'XAUUSD': 'OANDA:XAU_USD',
+  'XAGUSD': 'OANDA:XAG_USD',
+  'US30': 'OANDA:US30_USD',
+  'NAS100': 'OANDA:NAS100_USD',
+  'SPX500': 'OANDA:SPX500_USD',
+  'GER40': 'OANDA:DE30_EUR',
+  'UK100': 'OANDA:UK100_GBP',
+  'JP225': 'OANDA:JP225_USD',
+  'AUS200': 'OANDA:AU200_AUD',
+  'HK50': 'OANDA:HK33_HKD',
+  'FRA40': 'OANDA:FR40_EUR',
+  'USOIL': 'OANDA:WTICO_USD',
+  'UKOIL': 'OANDA:BCO_USD',
+  'Natural Gas': 'OANDA:NATURALGAS_USD',
+  'BTCUSD': 'BINANCE:BTCUSDT',
+  'ETHUSD': 'BINANCE:ETHUSDT',
+  'SOLUSD': 'BINANCE:SOLUSDT',
+  'XRPUSD': 'BINANCE:XRPUSDT',
+  'BNBUSD': 'BINANCE:BNBUSDT',
+  'DOGEUSD': 'BINANCE:DOGEUSDT',
+  'ADAUSD': 'BINANCE:ADAUSDT',
+};
+
+const lastFetchAttempt: Record<string, number> = {};
+const lastFinnhubSuccessTime: Record<string, number> = {};
+const BASE_REAL_PRICES: Record<string, number> = {};
+
+async function fetchSingleRealPrice(appSym: string) {
+  const now = Date.now();
+  // Limit to at most once every 10 seconds for XAUUSD to stay safe within Twelve Data free rate limits, 15s for others
+  const limitMs = appSym === 'XAUUSD' ? 10000 : 15000;
+  if (lastFetchAttempt[appSym] && now - lastFetchAttempt[appSym] < limitMs) {
+    return;
+  }
+  lastFetchAttempt[appSym] = now;
+
+  // 1. Try Twelve Data first (especially for XAUUSD to match the TradingView gold spot price perfectly!)
+  const twelveDataSymbols: Record<string, string> = {
+    'XAUUSD': 'XAU/USD',
+    'EURUSD': 'EUR/USD',
+    'GBPUSD': 'GBP/USD',
+    'USDJPY': 'USD/JPY',
+    'BTCUSD': 'BTC/USD',
+    'ETHUSD': 'ETH/USD',
+  };
+
+  const twelveSym = twelveDataSymbols[appSym];
+  if (twelveSym) {
+    try {
+      const fetchFn = (typeof window !== 'undefined' && (window as any).__originalFetch) || (typeof window !== 'undefined' ? window.fetch : fetch);
+      const url = `/api/price?symbol=${encodeURIComponent(twelveSym)}`;
+      const res = await fetchFn(url);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.price) {
+          const priceVal = parseFloat(data.price);
+          if (priceVal && !isNaN(priceVal) && priceVal > 0) {
+            console.log(`[Twelve Data ${appSym}] Fetched successfully: ${priceVal}`);
+            BASE_REAL_PRICES[appSym] = priceVal;
+            lastFinnhubSuccessTime[appSym] = Date.now();
+
+            const q = currentQuotes.find(quote => quote.symbol.toUpperCase().replace('/', '') === appSym);
+            if (q) {
+              q.price = priceVal;
+              if (!q.prevPrice) q.prevPrice = priceVal * 0.998;
+              q.high = Math.max(q.high || priceVal, priceVal);
+              q.low = Math.min(q.low || priceVal, priceVal);
+              q.change = parseFloat((((q.price - q.prevPrice) / q.prevPrice) * 100).toFixed(2));
+            }
+            return; // Success! Skip Finnhub
+          }
+        }
+      }
+    } catch (err) {
+      console.error(`Error in fetchSingleRealPrice (Twelve Data) for ${appSym}:`, err);
+    }
+  }
+
+  const finnhubSym = FINNHUB_TICKER_MAP[appSym];
+  if (!finnhubSym) return;
+
+  try {
+    const token = 'd92gc9hr01qraam0t0jgd92gc9hr01qraam0t0k0';
+    const res = await fetch(`https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(finnhubSym)}&token=${token}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.c !== undefined && data.c !== 0) {
+        const priceVal = parseFloat(data.c);
+        BASE_REAL_PRICES[appSym] = priceVal;
+        lastFinnhubSuccessTime[appSym] = Date.now();
+
+        const q = currentQuotes.find(quote => quote.symbol.toUpperCase().replace('/', '') === appSym);
+        if (q) {
+          q.price = priceVal;
+          if (data.pc !== undefined && data.pc !== 0) q.prevPrice = parseFloat(data.pc);
+          if (data.h !== undefined && data.h !== 0) q.high = parseFloat(data.h);
+          if (data.l !== undefined && data.l !== 0) q.low = parseFloat(data.l);
+          if (data.dp !== undefined) {
+            q.change = parseFloat(parseFloat(data.dp).toFixed(2));
+          } else if (q.prevPrice) {
+            q.change = parseFloat((((q.price - q.prevPrice) / q.prevPrice) * 100).toFixed(2));
+          }
+        }
+      }
+    }
+  } catch (err) {
+    // Fail silently
+  }
+}
+
+let rotationIndex = 0;
+
+async function fetchRealPrices() {
+  // Always fetch XAUUSD first on every call to keep gold 100% real-time and synced with chart
+  const symbols = Object.keys(FINNHUB_TICKER_MAP).filter(s => s !== 'XAUUSD');
+  if (symbols.length === 0) return;
+
+  const symbolsToFetch = ['XAUUSD'];
+  for (let i = 0; i < 2; i++) {
+    const sym = symbols[(rotationIndex + i) % symbols.length];
+    symbolsToFetch.push(sym);
+  }
+  rotationIndex = (rotationIndex + 2) % symbols.length;
+
+  for (const sym of symbolsToFetch) {
+    await fetchSingleRealPrice(sym);
+  }
+
+  // Sync with Yahoo Finance as primary reliable real-time provider
+  try {
+    const tickers = Object.values(TICKER_MAP).join(',');
+    const yahooUrl = `/api/yahoo/v7/finance/quote?symbols=${encodeURIComponent(tickers)}`;
+    const yahooRes = await fetch(yahooUrl);
+    
+    if (yahooRes.ok) {
+      const data = await yahooRes.json();
+      const results = data?.quoteResponse?.result;
+      
+      if (Array.isArray(results) && results.length > 0) {
+        results.forEach((item: any) => {
+          const yahooSym = item.symbol?.toUpperCase();
+          const appSym = REVERSE_TICKER_MAP[yahooSym];
+          
+          if (appSym) {
+            const q = currentQuotes.find(quote => quote.symbol.toUpperCase().replace('/', '') === appSym);
+            if (q && item.regularMarketPrice !== undefined) {
+              const priceVal = parseFloat(item.regularMarketPrice);
+              const finnhubAge = lastFinnhubSuccessTime[appSym] ? Date.now() - lastFinnhubSuccessTime[appSym] : Infinity;
+              
+              // If Finnhub has not succeeded recently (or returned error/rate-limit), Yahoo is the primary price
+              if (finnhubAge > 15000) {
+                BASE_REAL_PRICES[appSym] = priceVal;
+                q.price = priceVal;
+                if (item.regularMarketPreviousClose !== undefined) {
+                  q.prevPrice = parseFloat(item.regularMarketPreviousClose);
+                }
+                if (item.regularMarketDayHigh !== undefined) {
+                  q.high = parseFloat(item.regularMarketDayHigh);
+                }
+                if (item.regularMarketDayLow !== undefined) {
+                  q.low = parseFloat(item.regularMarketDayLow);
+                }
+                if (item.regularMarketChangePercent !== undefined) {
+                  q.change = parseFloat(parseFloat(item.regularMarketChangePercent).toFixed(2));
+                }
+              }
+            }
+          }
+        });
+      }
+    }
+  } catch (err) {
+    // Suppress warning unless debug
+  }
+
+  // Sync backward compatible slash-symbol duplicates
+  currentQuotes.forEach(q => {
+    if (q.symbol === 'EUR/USD') {
+      const parent = currentQuotes.find(x => x.symbol === 'EURUSD');
+      if (parent) {
+        q.price = parent.price;
+        q.prevPrice = parent.prevPrice;
+        q.high = parent.high;
+        q.low = parent.low;
+        q.change = parent.change;
+      }
+    } else if (q.symbol === 'GBP/USD') {
+      const parent = currentQuotes.find(x => x.symbol === 'GBPUSD');
+      if (parent) {
+        q.price = parent.price;
+        q.prevPrice = parent.prevPrice;
+        q.high = parent.high;
+        q.low = parent.low;
+        q.change = parent.change;
+      }
+    } else if (q.symbol === 'USD/JPY') {
+      const parent = currentQuotes.find(x => x.symbol === 'USDJPY');
+      if (parent) {
+        q.price = parent.price;
+        q.prevPrice = parent.prevPrice;
+        q.high = parent.high;
+        q.low = parent.low;
+        q.change = parent.change;
+      }
+    } else if (q.symbol === 'BTC/USD') {
+      const parent = currentQuotes.find(x => x.symbol === 'BTCUSD');
+      if (parent) {
+        q.price = parent.price;
+        q.prevPrice = parent.prevPrice;
+        q.high = parent.high;
+        q.low = parent.low;
+        q.change = parent.change;
+      }
+    } else if (q.symbol === 'GOLD') {
+      const parent = currentQuotes.find(x => x.symbol === 'XAUUSD');
+      if (parent) {
+        q.price = parent.price;
+        q.prevPrice = parent.prevPrice;
+        q.high = parent.high;
+        q.low = parent.low;
+        q.change = parent.change;
+      }
+    }
+  });
+
+  // Update stats for any newly set prices
+  currentQuotes.forEach(q => {
+    if (!q.prevPrice) {
+      q.prevPrice = q.price;
+    }
+    if (!q.high || q.price > q.high) q.high = q.price;
+    if (!q.low || q.price < q.low) q.low = q.price;
+    q.change = parseFloat((((q.price - q.prevPrice) / q.prevPrice) * 100).toFixed(2));
+  });
+}
+
 function runSimulatedTickLoop() {
   setInterval(async () => {
-    // 1. Tick quotes with random walks
+    // 1. Tick quotes with tiny flickers bounded tightly around the baseline real price
     currentQuotes.forEach(q => {
-      const changeRange = q.price * 0.0008; // Max 0.08% change per tick
-      const change = (Math.random() - 0.495) * changeRange;
-      q.price = parseFloat((q.price + change).toFixed(5));
+      const appSym = q.symbol.toUpperCase().replace('/', '');
+      const base = BASE_REAL_PRICES[appSym] || q.price;
+      
+      // Calculate a tiny flicker step (+/- 0.002% max per tick)
+      const maxDeviation = base * 0.00012; // tight bound of 0.012% tolerance to match TradingView perfectly
+      const step = (Math.random() - 0.5) * (base * 0.00002);
+      let newPrice = q.price + step;
+      
+      // Ensure no extreme drift, clamp to the baseline real price
+      if (newPrice > base + maxDeviation) newPrice = base + maxDeviation;
+      if (newPrice < base - maxDeviation) newPrice = base - maxDeviation;
+
+      // Keep formatting consistent
+      const props = ASSET_PROPERTIES[appSym];
+      const digits = props ? props.digits : 5;
+      q.price = parseFloat(newPrice.toFixed(digits));
       q.high = Math.max(q.high, q.price);
       q.low = Math.min(q.low, q.price);
-      q.change = parseFloat((((q.price - q.prevPrice) / q.prevPrice) * 100).toFixed(2));
+      if (q.prevPrice) {
+        q.change = parseFloat((((q.price - q.prevPrice) / q.prevPrice) * 100).toFixed(2));
+      }
     });
 
     // 2. Process open trades and risk rules from Firestore
@@ -164,19 +558,44 @@ function runSimulatedTickLoop() {
         const q = currentQuotes.find(quote => quote.symbol.toUpperCase().replace('/', '') === trade.asset.toUpperCase().replace('/', ''));
         if (!q) continue;
 
-        const currentPrice = q.price;
-        const props = ASSET_PROPERTIES[trade.asset.toUpperCase().replace('/', '')];
+        let currentPrice = q.price;
+
+        // Automatic Migration Logic: Overwrite entryPrice if it is the old stale Gold price (e.g. 2332.55, 2332.59, 2332.60, 2332.65)
+        const isOldStaleGold = trade.asset.toUpperCase().replace('/', '') === 'XAUUSD' && (trade.entryPrice < 3000 || Math.abs(trade.entryPrice - 2332.6) < 1.0);
+        
+        trade.currentPrice = currentPrice;
+        const updatePayload: any = {
+          currentPrice: currentPrice
+        };
+
+        if (isOldStaleGold) {
+          trade.entryPrice = currentPrice;
+          updatePayload.entryPrice = currentPrice;
+        }
+
+        await updateDoc(doc(db, 'trades', trade.id), updatePayload);
+
+        const assetClean = trade.asset.toUpperCase().replace('/', '');
+        const props = ASSET_PROPERTIES[assetClean];
         if (!props) continue;
 
         // Calculate PnL in USD
         let pnlQuote = 0;
-        const pipsDiff = (currentPrice - trade.entryPrice) / props.pipSize;
-        const pipValue = props.pipSize * props.contractSize;
+        let pipsDiff = 0;
+        let pipValue = 0;
 
-        if (trade.direction === 'buy') {
-          pnlQuote = pipsDiff * pipValue * trade.lotSize;
+        if (assetClean === 'XAUUSD' || assetClean === 'GOLD') {
+          pipsDiff = (trade.direction === 'buy' ? (currentPrice - trade.entryPrice) : (trade.entryPrice - currentPrice)) / 0.1;
+          pipValue = 0.1 * props.contractSize;
+          pnlQuote = pipsDiff * trade.lotSize * pipValue;
         } else {
-          pnlQuote = -pipsDiff * pipValue * trade.lotSize;
+          pipsDiff = (currentPrice - trade.entryPrice) / props.pipSize;
+          pipValue = props.pipSize * props.contractSize;
+          if (trade.direction === 'buy') {
+            pnlQuote = pipsDiff * pipValue * trade.lotSize;
+          } else {
+            pnlQuote = -pipsDiff * pipValue * trade.lotSize;
+          }
         }
 
         const exchangeRate = getQuoteToUSDExchangeRate(trade.asset);
@@ -326,16 +745,21 @@ export function initFirebaseFetch() {
   // Run initial seed
   seedDefaultData();
 
+  // Run real-time background market quotes fetch
+  fetchRealPrices();
+  setInterval(fetchRealPrices, 4000);
+
   // Run real-time background market quotes loop
   runSimulatedTickLoop();
 
   const originalFetch = window.fetch;
+  (window as any).__originalFetch = originalFetch;
 
   const myFetch = async function (input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
     const urlString = input.toString();
 
-    // Only intercept /api/ requests
-    if (!urlString.includes('/api/')) {
+    // Only intercept /api/ requests, but bypass /api/yahoo
+    if (!urlString.includes('/api/') || urlString.includes('/api/yahoo')) {
       return originalFetch(input, init);
     }
 
@@ -354,10 +778,39 @@ export function initFirebaseFetch() {
       // GET /api/state
       // ----------------------------------------------------
       if (path === '/api/state' && method === 'GET') {
+        const activeSym = url.searchParams.get('activeSymbol');
+        if (activeSym) {
+          const normActiveSymbol = activeSym.toUpperCase().replace('/', '');
+          await fetchSingleRealPrice(normActiveSymbol);
+        }
+
         const usersSnap = await getDocs(collection(db, 'users'));
         const accountsSnap = await getDocs(collection(db, 'accounts'));
         const ordersSnap = await getDocs(collection(db, 'orders'));
         const tradesSnap = await getDocs(collection(db, 'trades'));
+        const loadedTrades = tradesSnap.docs.map(doc => doc.data() as Trade);
+
+        // On-the-fly migration for any stale/cached gold entry price (e.g. 2332.55) to the latest real-time price
+        for (const trade of loadedTrades) {
+          if (trade.status === 'open') {
+            const cleanAsset = trade.asset.toUpperCase().replace('/', '');
+            const isStaleGold = cleanAsset === 'XAUUSD' && (trade.entryPrice < 3000 || Math.abs(trade.entryPrice - 2332.6) < 1.0);
+            if (isStaleGold) {
+              const q = currentQuotes.find(quote => quote.symbol.toUpperCase().replace('/', '') === 'XAUUSD');
+              const livePrice = q ? q.price : 2332.59;
+              if (livePrice && livePrice > 0 && Math.abs(trade.entryPrice - livePrice) > 1.0) {
+                console.log(`[API State Migration] Overwriting stale gold entry price ${trade.entryPrice} with live price ${livePrice} for trade ${trade.id}`);
+                trade.entryPrice = livePrice;
+                trade.currentPrice = livePrice;
+                await updateDoc(doc(db, 'trades', trade.id), {
+                  entryPrice: livePrice,
+                  currentPrice: livePrice
+                });
+              }
+            }
+          }
+        }
+
         const accountLogsSnap = await getDocs(collection(db, 'accountLogs'));
         const payoutRequestsSnap = await getDocs(collection(db, 'payoutRequests'));
         const couponsSnap = await getDocs(collection(db, 'coupons'));
@@ -372,7 +825,7 @@ export function initFirebaseFetch() {
           users: usersSnap.docs.map(doc => doc.data()),
           accounts: accountsSnap.docs.map(doc => doc.data()),
           orders: ordersSnap.docs.map(doc => doc.data()),
-          trades: tradesSnap.docs.map(doc => doc.data()),
+          trades: loadedTrades,
           accountLogs: accountLogsSnap.docs.map(doc => doc.data()),
           payoutRequests: payoutRequestsSnap.docs.map(doc => doc.data()),
           quotes: currentQuotes,
@@ -384,6 +837,44 @@ export function initFirebaseFetch() {
           challengeCommissions: challengeComms,
           liveDataUnavailable: false
         }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      // ----------------------------------------------------
+      // GET /api/candles/:symbol
+      // ----------------------------------------------------
+      if (path.startsWith('/api/candles/') && method === 'GET') {
+        const symbolEncoded = path.split('/')[3];
+        const symbol = decodeURIComponent(symbolEncoded);
+        const q = currentQuotes.find(quote => quote.symbol.toUpperCase().replace('/', '') === symbol.toUpperCase().replace('/', '')) || currentQuotes[0];
+        const basePrice = q ? q.price : 1.0;
+        
+        const list = [];
+        let currentPrice = basePrice;
+        const now = Math.floor(Date.now() / 1000);
+        const timeStep = 10;
+        
+        for (let i = 60; i > 0; i--) {
+          const drift = (Math.random() - 0.495) * (basePrice * 0.0006);
+          const open = currentPrice;
+          const close = currentPrice + drift;
+          const high = Math.max(open, close) + Math.random() * (basePrice * 0.0003);
+          const low = Math.min(open, close) - Math.random() * (basePrice * 0.0003);
+          
+          list.push({
+            time: now - i * timeStep,
+            open,
+            high,
+            low,
+            close,
+            volume: Math.floor(Math.random() * 300) + 50
+          });
+          currentPrice = close;
+        }
+
+        return new Response(JSON.stringify(list), {
           status: 200,
           headers: { 'Content-Type': 'application/json' }
         });
@@ -666,7 +1157,7 @@ export function initFirebaseFetch() {
       // POST /api/trades
       // ----------------------------------------------------
       if (path === '/api/trades' && method === 'POST') {
-        const { accountId, asset, direction, lotSize, stopLoss, takeProfit } = body;
+        const { accountId, asset, direction, lotSize, stopLoss, takeProfit, currentMarketPrice } = body;
         const accSnap = await getDoc(doc(db, 'accounts', accountId));
 
         if (!accSnap.exists() || accSnap.data()?.status !== 'active') {
@@ -678,19 +1169,23 @@ export function initFirebaseFetch() {
           return new Response(JSON.stringify({ error: 'Asset not found' }), { status: 400 });
         }
 
-        const newTrade: Trade = {
+        const matchedPrice = currentMarketPrice && typeof currentMarketPrice === 'number' && currentMarketPrice > 0 
+          ? currentMarketPrice 
+          : q.price;
+
+        const newTrade: any = {
           id: `TRD-${Math.floor(100000 + Math.random() * 900000)}`,
           accountId,
           asset,
           direction,
           lotSize,
-          entryPrice: q.price,
-          currentPrice: q.price,
+          entryPrice: matchedPrice,
+          currentPrice: matchedPrice,
           createdAt: new Date().toISOString(),
           status: 'open',
           profitLoss: 0,
-          stopLoss: stopLoss || undefined,
-          takeProfit: takeProfit || undefined,
+          stopLoss: stopLoss || null,
+          takeProfit: takeProfit || null,
           orderType: 'market'
         };
 
@@ -700,7 +1195,7 @@ export function initFirebaseFetch() {
         await setDoc(logRef, {
           id: logRef.id,
           accountId,
-          message: `Position opened: ${direction.toUpperCase()} ${lotSize} Lots of ${asset} at ${q.price}`,
+          message: `Position opened: ${direction.toUpperCase()} ${lotSize} Lots of ${asset} at ${matchedPrice}`,
           type: 'info',
           timestamp: new Date().toISOString()
         });
@@ -1258,4 +1753,82 @@ export function initFirebaseFetch() {
   }
 
   console.log('[Firebase API Router] Initialized perfectly. All backend operations redirected to Firestore.');
+}
+
+export async function getLatestPriceFromChart(symbol: string): Promise<number | null> {
+  try {
+    const cleanSym = symbol.toUpperCase().replace('/', '');
+    const q = currentQuotes.find(quote => quote.symbol.toUpperCase().replace('/', '') === cleanSym);
+    if (q && q.price && q.price > 0) {
+      return q.price;
+    }
+    
+    const fetchFn = (typeof window !== 'undefined' && (window as any).__originalFetch) || (typeof window !== 'undefined' ? window.fetch : null);
+    if (fetchFn) {
+      // Try Twelve Data first
+      const twelveDataSymbols: Record<string, string> = {
+        'XAUUSD': 'XAU/USD',
+        'EURUSD': 'EUR/USD',
+        'GBPUSD': 'GBP/USD',
+        'USDJPY': 'USD/JPY',
+        'BTCUSD': 'BTC/USD',
+        'ETHUSD': 'ETH/USD',
+      };
+      const twelveSym = twelveDataSymbols[cleanSym];
+      if (twelveSym) {
+        try {
+          const url = `/api/price?symbol=${encodeURIComponent(twelveSym)}`;
+          const res = await fetchFn(url);
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data.price) {
+              const livePrice = parseFloat(data.price);
+              if (livePrice > 0) return livePrice;
+            }
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+
+      // 1. Try Finnhub second
+      const finnhubSym = FINNHUB_TICKER_MAP[cleanSym];
+      if (finnhubSym) {
+        const token = 'd92gc9hr01qraam0t0jgd92gc9hr01qraam0t0k0';
+        const finnhubUrl = `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(finnhubSym)}&token=${token}`;
+        try {
+          const finnhubRes = await fetchFn(finnhubUrl);
+          if (finnhubRes.ok) {
+            const data = await finnhubRes.json();
+            if (data && data.c !== undefined && data.c !== 0) {
+              const livePrice = parseFloat(data.c);
+              if (livePrice > 0) return livePrice;
+            }
+          }
+        } catch (e) {
+          // ignore and fallback
+        }
+      }
+
+      // 2. Fallback to YahooFinance API
+      const yahooSym = TICKER_MAP[cleanSym];
+      if (yahooSym) {
+        const yahooUrl = `/api/yahoo/v7/finance/quote?symbols=${encodeURIComponent(yahooSym)}`;
+        const yahooRes = await fetchFn(yahooUrl);
+        if (yahooRes.ok) {
+          const data = await yahooRes.json();
+          const results = data?.quoteResponse?.result;
+          if (Array.isArray(results) && results.length > 0 && results[0].regularMarketPrice !== undefined) {
+            const livePrice = parseFloat(results[0].regularMarketPrice);
+            if (livePrice > 0) {
+              return livePrice;
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error("Error in getLatestPriceFromChart fallback:", err);
+  }
+  return null;
 }

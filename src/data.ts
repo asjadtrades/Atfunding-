@@ -340,7 +340,7 @@ export const ASSET_PROPERTIES: Record<string, {
   'CHFJPY': { pipSize: 0.01, lotSizeMultiplier: 100000, digits: 3, spread: 0.021, contractSize: 100000, tickSize: 0.001, tickValue: 0.64, minLot: 0.01, maxLot: 100, lotStep: 0.01, decimals: 3 },
 
   // Metals
-  'XAUUSD': { pipSize: 0.01, lotSizeMultiplier: 100, digits: 2, spread: 0.25, contractSize: 100, tickSize: 0.01, tickValue: 1.0, minLot: 0.01, maxLot: 50, lotStep: 0.01, decimals: 2 },
+  'XAUUSD': { pipSize: 0.1, lotSizeMultiplier: 100, digits: 2, spread: 0.25, contractSize: 100, tickSize: 0.01, tickValue: 1.0, minLot: 0.01, maxLot: 50, lotStep: 0.01, decimals: 2 },
   'XAGUSD': { pipSize: 0.01, lotSizeMultiplier: 5000, digits: 3, spread: 0.015, contractSize: 5000, tickSize: 0.01, tickValue: 50.0, minLot: 0.01, maxLot: 50, lotStep: 0.01, decimals: 3 },
 
   // Indices
@@ -373,5 +373,5 @@ export const ASSET_PROPERTIES: Record<string, {
   'GBP/USD': { pipSize: 0.0001, lotSizeMultiplier: 100000, digits: 5, spread: 0.00016, contractSize: 100000, tickSize: 0.00001, tickValue: 1.0, minLot: 0.01, maxLot: 100, lotStep: 0.01, decimals: 5 },
   'USD/JPY': { pipSize: 0.01, lotSizeMultiplier: 100000, digits: 3, spread: 0.015, contractSize: 100000, tickSize: 0.001, tickValue: 0.64, minLot: 0.01, maxLot: 100, lotStep: 0.01, decimals: 3 },
   'BTC/USD': { pipSize: 1.0, lotSizeMultiplier: 1, digits: 2, spread: 8.0, contractSize: 1, tickSize: 0.01, tickValue: 0.01, minLot: 0.01, maxLot: 50, lotStep: 0.01, decimals: 2 },
-  'GOLD': { pipSize: 0.01, lotSizeMultiplier: 100, digits: 2, spread: 0.25, contractSize: 100, tickSize: 0.01, tickValue: 1.0, minLot: 0.01, maxLot: 50, lotStep: 0.01, decimals: 2 }
+  'GOLD': { pipSize: 0.1, lotSizeMultiplier: 100, digits: 2, spread: 0.25, contractSize: 100, tickSize: 0.01, tickValue: 1.0, minLot: 0.01, maxLot: 50, lotStep: 0.01, decimals: 2 }
 };

@@ -118,7 +118,8 @@ interface TradingTerminalProps {
     takeProfit?: number, 
     orderType?: OrderType, 
     triggerPrice?: number,
-    leverage?: number
+    leverage?: number,
+    currentMarketPrice?: number
   ) => void;
   onCloseTrade: (tradeId: string) => void;
   onCancelOrder: (tradeId: string) => void;
@@ -224,14 +225,21 @@ export default function TradingTerminal({
 
   function calculateProjectedPnL(p: Trade, targetPrice: number) {
     const asset = p.asset;
-    const props = ASSET_PROPERTIES[asset] || { contractSize: 100000 };
+    const cleanSym = asset.toUpperCase().replace('/', '');
+    const props = ASSET_PROPERTIES[cleanSym] || { contractSize: 100000 };
     const contractSize = props.contractSize;
 
     let profitLoss = 0;
-    if (p.direction === 'buy') {
-      profitLoss = (targetPrice - p.entryPrice) * p.lotSize * contractSize;
+    if (cleanSym === 'XAUUSD' || cleanSym === 'GOLD') {
+      const pipDifference = (p.direction === 'buy' ? (targetPrice - p.entryPrice) : (p.entryPrice - targetPrice)) / 0.1;
+      const pipValueInUSD = 0.1 * contractSize; // Adjusted for contract size
+      profitLoss = pipDifference * p.lotSize * pipValueInUSD;
     } else {
-      profitLoss = (p.entryPrice - targetPrice) * p.lotSize * contractSize;
+      if (p.direction === 'buy') {
+        profitLoss = (targetPrice - p.entryPrice) * p.lotSize * contractSize;
+      } else {
+        profitLoss = (p.entryPrice - targetPrice) * p.lotSize * contractSize;
+      }
     }
 
     // Convert Quote Currency to USD with 100% MT5 accuracy
@@ -348,7 +356,7 @@ export default function TradingTerminal({
   const [isChartFullscreen, setIsChartFullscreen] = useState(false);
 
   // Chart mode: 'tradingview' or 'simulator'
-  const [chartMode, setChartMode] = useState<'tradingview' | 'simulator'>('simulator');
+  const [chartMode, setChartMode] = useState<'tradingview' | 'simulator'>('tradingview');
 
   // Chart crosshair position
   const [crosshair, setCrosshair] = useState<{ x: number; y: number } | null>(null);
@@ -368,6 +376,10 @@ export default function TradingTerminal({
     prevPrice: liveMarketPrice.previousClose,
     high: liveMarketPrice.high,
     low: liveMarketPrice.low
+  };
+
+  const getLatestPriceFromChart = () => {
+    return activeQuote.price;
   };
 
   const [realCandles, setRealCandles] = useState<Candle[]>(() => {
@@ -518,6 +530,7 @@ export default function TradingTerminal({
     const parsedSL = stopLoss ? Number(stopLoss) : undefined;
     const parsedTP = takeProfit ? Number(takeProfit) : undefined;
     const parsedTrigger = triggerPrice ? Number(triggerPrice) : undefined;
+    const currentPrice = getLatestPriceFromChart();
 
     onPlaceTrade(
       activeSymbol,
@@ -527,13 +540,14 @@ export default function TradingTerminal({
       parsedTP,
       orderType,
       parsedTrigger,
-      leverage
+      leverage,
+      currentPrice
     );
 
     // Show beautiful toast notification
     const matchedPrice = direction === 'buy'
-      ? (activeQuote.price + (ASSET_PROPERTIES[activeSymbol]?.spread || 0) / 2)
-      : (activeQuote.price - (ASSET_PROPERTIES[activeSymbol]?.spread || 0) / 2);
+      ? (currentPrice + (ASSET_PROPERTIES[activeSymbol]?.spread || 0) / 2)
+      : (currentPrice - (ASSET_PROPERTIES[activeSymbol]?.spread || 0) / 2);
     
     setExecutionNotification(`Instant ${direction.toUpperCase()} order of ${lotSize} Lots ${activeSymbol} opened at ${matchedPrice.toFixed(ASSET_PROPERTIES[activeSymbol]?.digits || 2)}`);
     setTimeout(() => {
@@ -550,6 +564,7 @@ export default function TradingTerminal({
     const parsedSL = stopLoss ? Number(stopLoss) : undefined;
     const parsedTP = takeProfit ? Number(takeProfit) : undefined;
     const parsedTrigger = triggerPrice ? Number(triggerPrice) : undefined;
+    const currentPrice = getLatestPriceFromChart();
 
     onPlaceTrade(
       activeSymbol,
@@ -559,13 +574,14 @@ export default function TradingTerminal({
       parsedTP,
       orderType,
       parsedTrigger,
-      leverage
+      leverage,
+      currentPrice
     );
 
     // Show beautiful toast notification
     const matchedPrice = dir === 'buy'
-      ? (activeQuote.price + (ASSET_PROPERTIES[activeSymbol]?.spread || 0) / 2)
-      : (activeQuote.price - (ASSET_PROPERTIES[activeSymbol]?.spread || 0) / 2);
+      ? (currentPrice + (ASSET_PROPERTIES[activeSymbol]?.spread || 0) / 2)
+      : (currentPrice - (ASSET_PROPERTIES[activeSymbol]?.spread || 0) / 2);
     
     setExecutionNotification(`One-Click ${dir.toUpperCase()} order of ${lotSize} Lots ${activeSymbol} executed at ${matchedPrice.toFixed(ASSET_PROPERTIES[activeSymbol]?.digits || 2)}`);
     setTimeout(() => {
@@ -582,15 +598,21 @@ export default function TradingTerminal({
     return rawPositions.map(pos => {
       const liveMarket = getMarketPrice(pos.asset);
       const closePrice = liveMarket.price;
-      
-      const props = ASSET_PROPERTIES[pos.asset] || { contractSize: 100000 };
+      const cleanSym = pos.asset.toUpperCase().replace('/', '');
+      const props = ASSET_PROPERTIES[cleanSym] || { contractSize: 100000 };
       const contractSize = props.contractSize;
 
       let rawPnL = 0;
-      if (pos.direction === 'buy') {
-        rawPnL = (closePrice - pos.entryPrice) * pos.lotSize * contractSize;
+      if (cleanSym === 'XAUUSD' || cleanSym === 'GOLD') {
+        const pipDifference = (pos.direction === 'buy' ? (closePrice - pos.entryPrice) : (pos.entryPrice - closePrice)) / 0.1;
+        const pipValueInUSD = 0.1 * contractSize; // Adjusted for contract size
+        rawPnL = pipDifference * pos.lotSize * pipValueInUSD;
       } else {
-        rawPnL = (pos.entryPrice - closePrice) * pos.lotSize * contractSize;
+        if (pos.direction === 'buy') {
+          rawPnL = (closePrice - pos.entryPrice) * pos.lotSize * contractSize;
+        } else {
+          rawPnL = (pos.entryPrice - closePrice) * pos.lotSize * contractSize;
+        }
       }
 
       const conversionRate = getClientQuoteToUSDExchangeRate(pos.asset);
@@ -1278,14 +1300,14 @@ export default function TradingTerminal({
           {/* Quick actions inside market watch */}
           <div className="border-t border-gray-900 pt-3 mt-3 grid grid-cols-2 gap-2">
             <button
-              onClick={() => onPlaceTrade(activeSymbol, 'buy', lotSize, undefined, undefined, 'market', undefined, leverage)}
+              onClick={() => onPlaceTrade(activeSymbol, 'buy', lotSize, undefined, undefined, 'market', undefined, leverage, getLatestPriceFromChart())}
               className="bg-emerald-500 hover:opacity-90 active:scale-95 transition-all text-black font-semibold text-xs py-2 rounded-lg cursor-pointer flex items-center justify-center gap-1"
             >
               <TrendingUp className="w-3.5 h-3.5" />
               <span>Quick Buy {lotSize}L</span>
             </button>
             <button
-              onClick={() => onPlaceTrade(activeSymbol, 'sell', lotSize, undefined, undefined, 'market', undefined, leverage)}
+              onClick={() => onPlaceTrade(activeSymbol, 'sell', lotSize, undefined, undefined, 'market', undefined, leverage, getLatestPriceFromChart())}
               className="bg-red-500 hover:opacity-90 active:scale-95 transition-all text-white font-semibold text-xs py-2 rounded-lg cursor-pointer flex items-center justify-center gap-1"
             >
               <TrendingDown className="w-3.5 h-3.5" />
@@ -1312,24 +1334,6 @@ export default function TradingTerminal({
               <div className="flex items-center gap-3">
                 <span className="text-sm font-bold text-white">{activeSymbol}</span>
                 
-                {/* Chart Mode Selector */}
-                <div className="flex bg-gray-900 p-0.5 rounded-lg border border-gray-800">
-                  <button
-                    type="button"
-                    onClick={() => setChartMode('tradingview')}
-                    className={`px-2 py-0.5 rounded text-[9px] font-extrabold tracking-wider uppercase transition-colors cursor-pointer ${chartMode === 'tradingview' ? 'bg-blue-500/10 border border-blue-500/20 text-blue-400 font-bold' : 'text-gray-400 hover:text-white'}`}
-                  >
-                    TradingView Live
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setChartMode('simulator')}
-                    className={`px-2 py-0.5 rounded text-[9px] font-extrabold tracking-wider uppercase transition-colors cursor-pointer ${chartMode === 'simulator' ? 'bg-amber-500/10 border border-amber-500/20 text-amber-500 font-bold' : 'text-gray-400 hover:text-white'}`}
-                  >
-                    Simulator
-                  </button>
-                </div>
-
                 {/* Timeframes */}
                 <div className="flex gap-0.5 bg-gray-900 p-0.5 rounded-lg border border-gray-800 animate-in fade-in duration-200">
                   {(['1m', '5m', '15m', '1H', '4H', '1D'] as const).map((t) => (
