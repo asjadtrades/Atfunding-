@@ -764,7 +764,7 @@ export default function AdminPanel({
                                   Activate
                                 </button>
                               )}
-                              {account.status !== 'breached' && account.status !== 'pending_payment' ? (
+                              {account.status !== 'breached' && account.status !== 'pending_payment' && account.status !== 're_syncing_data' ? (
                                 <button
                                   onClick={() => onUpdateAccountStatus(account.id, 'breached', account.phase)}
                                   className="bg-red-600/20 hover:bg-red-600/30 text-red-400 px-2 py-1 rounded text-xxs font-medium cursor-pointer"
@@ -772,14 +772,23 @@ export default function AdminPanel({
                                 >
                                   Breach Account
                                 </button>
-                              ) : account.status === 'breached' ? (
-                                <button
-                                  onClick={() => onUpdateAccountStatus(account.id, 'active', account.phase)}
-                                  className="bg-emerald-500 hover:opacity-90 text-black px-2 py-1 rounded text-xxs font-bold cursor-pointer"
-                                  title="Restore Account"
-                                >
-                                  Restore Account
-                                </button>
+                              ) : account.status === 'breached' || account.status === 're_syncing_data' ? (
+                                <div className="flex gap-1.5">
+                                  <button
+                                    onClick={() => onUpdateAccountStatus(account.id, 'active', account.phase)}
+                                    className="bg-emerald-500 hover:opacity-90 text-black px-2 py-1 rounded text-xxs font-bold cursor-pointer"
+                                    title="Restore Account"
+                                  >
+                                    Restore
+                                  </button>
+                                  <button
+                                    onClick={() => onUpdateAccountStatus(account.id, 'active', account.phase)}
+                                    className="bg-amber-500 hover:bg-amber-400 text-black px-2 py-1 rounded text-xxs font-bold cursor-pointer"
+                                    title="Clear Breach/Reset Status"
+                                  >
+                                    Clear Breach/Reset Status
+                                  </button>
+                                </div>
                               ) : null}
                             </div>
                           </td>
@@ -1225,13 +1234,21 @@ export default function AdminPanel({
                                         Suspend
                                       </button>
                                     )}
-                                    {(acc.status === 'suspended' || acc.status === 'breached') && (
-                                      <button
-                                        onClick={() => onUpdateAccountStatus(acc.id, 'active', acc.phase)}
-                                        className="bg-emerald-500 hover:opacity-90 text-black px-2 py-1 rounded text-xxs font-bold cursor-pointer"
-                                      >
-                                        Restore
-                                      </button>
+                                    {(acc.status === 'suspended' || acc.status === 'breached' || acc.status === 're_syncing_data') && (
+                                      <div className="flex gap-1.5 justify-end">
+                                        <button
+                                          onClick={() => onUpdateAccountStatus(acc.id, 'active', acc.phase)}
+                                          className="bg-emerald-500 hover:opacity-90 text-black px-2 py-1 rounded text-xxs font-bold cursor-pointer"
+                                        >
+                                          Restore
+                                        </button>
+                                        <button
+                                          onClick={() => onUpdateAccountStatus(acc.id, 'active', acc.phase)}
+                                          className="bg-amber-500 hover:bg-amber-400 text-black px-2 py-1 rounded text-xxs font-bold cursor-pointer"
+                                        >
+                                          Clear Breach/Reset Status
+                                        </button>
+                                      </div>
                                     )}
                                   </div>
                                 </td>
@@ -2339,16 +2356,27 @@ export default function AdminPanel({
                         Breach Account
                       </button>
                     </div>
-                  ) : selectedAccountForDetails.status === 'breached' ? (
-                    <button
-                      onClick={() => {
-                        onUpdateAccountStatus(selectedAccountForDetails.id, 'active', selectedAccountForDetails.phase);
-                        setSelectedAccountForDetails({ ...selectedAccountForDetails, status: 'active' });
-                      }}
-                      className="bg-emerald-500 hover:opacity-90 text-black px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer"
-                    >
-                      Restore Account
-                    </button>
+                  ) : (selectedAccountForDetails.status === 'breached' || selectedAccountForDetails.status === 're_syncing_data') ? (
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          onUpdateAccountStatus(selectedAccountForDetails.id, 'active', selectedAccountForDetails.phase);
+                          setSelectedAccountForDetails({ ...selectedAccountForDetails, status: 'active' });
+                        }}
+                        className="bg-emerald-500 hover:opacity-90 text-black px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer"
+                      >
+                        Restore Account
+                      </button>
+                      <button
+                        onClick={() => {
+                          onUpdateAccountStatus(selectedAccountForDetails.id, 'active', selectedAccountForDetails.phase);
+                          setSelectedAccountForDetails({ ...selectedAccountForDetails, status: 'active' });
+                        }}
+                        className="bg-amber-500 hover:bg-amber-400 text-black px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer"
+                      >
+                        Clear Breach/Reset Status
+                      </button>
+                    </div>
                   ) : null}
                 </div>
               </div>

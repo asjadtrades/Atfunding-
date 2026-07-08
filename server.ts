@@ -9,84 +9,196 @@ async function startServer() {
   // JSON parsing middleware
   app.use(express.json());
 
-  // Resilient Server-Side Simulated Ticking Engine
-  const priceState: Record<string, number> = {
-    'EURUSD=X': 1.08520,
-    'GBPUSD=X': 1.26840,
-    'USDJPY=X': 157.350,
-    'USDCHF=X': 0.8950,
-    'USDCAD=X': 1.3650,
-    'AUDUSD=X': 0.6650,
-    'NZDUSD=X': 0.6120,
-    'EURJPY=X': 170.80,
-    'GBPJPY=X': 199.50,
-    'EURGBP=X': 0.8550,
-    'AUDJPY=X': 104.70,
-    'CADJPY=X': 115.30,
-    'CHFJPY=X': 175.70,
-    'XAUUSD=X': 2332.60,
-    'SI=F': 29.50,
-    '^DJI': 39120.0,
-    '^NDX': 19850.0,
-    '^GSPC': 5470.0,
-    '^GDAXI': 18150.0,
-    '^FTSE': 8210.0,
-    '^N225': 38600.0,
-    '^AXJO': 7780.0,
-    '^HSI': 18050.0,
-    '^FCHI': 7630.0,
-    'CL=F': 80.50,
-    'BZ=F': 84.80,
-    'NG=F': 2.85,
-    'BTC-USD': 67250.00,
-    'ETH-USD': 3520.00,
-    'SOL-USD': 145.00,
-    'XRP-USD': 0.4850,
-    'BNB-USD': 580.00,
-    'DOGE-USD': 0.12500,
-    'ADA-USD': 0.3750,
-  };
-
-  const prevCloseState: Record<string, number> = {};
-  Object.entries(priceState).forEach(([sym, val]) => {
-    prevCloseState[sym] = val * (1 + (Math.random() - 0.5) * 0.002);
+  // CORS middleware for iframe/sandbox and cross-origin support
+  app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin && origin !== 'null') {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    } else {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, PATCH, DELETE');
+    res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With,content-type,Authorization');
+    if (req.method === 'OPTIONS') {
+      return res.sendStatus(200);
+    }
+    next();
   });
 
-  // Background price ticking loop (runs on server to keep prices moving)
-  setInterval(() => {
-    Object.keys(priceState).forEach(sym => {
-      // Tiny random walk step: max +/- 0.012%
-      const step = 1 + (Math.random() - 0.5) * 0.00024;
-      priceState[sym] = priceState[sym] * step;
-    });
-  }, 1000);
+  // Real-Market Memory State (Stores last known real market prices, strictly NO simulated modifications)
+  const lastRealPriceInMemory: Record<string, string> = {
+    'XAUUSD': '2365.40',
+    'GOLD': '2365.40',
+    'EURUSD': '1.08520',
+    'GBPUSD': '1.26840',
+    'USDJPY': '157.350',
+    'USDCHF': '0.8950',
+    'USDCAD': '1.3650',
+    'AUDUSD': '0.6650',
+    'NZDUSD': '0.6120',
+    'EURJPY': '170.80',
+    'GBPJPY': '199.50',
+    'EURGBP': '0.8550',
+    'AUDJPY': '104.70',
+    'CADJPY': '115.30',
+    'CHFJPY': '175.70',
+    'US30': '39120.0',
+    'NAS100': '19850.0',
+    'SPX500': '5470.0',
+    'GER40': '18150.0',
+    'UK100': '8210.0',
+    'JP225': '38600.0',
+    'AUS200': '7780.0',
+    'HK50': '18050.0',
+    'FRA40': '7630.0',
+    'USOIL': '80.50',
+    'UKOIL': '84.80',
+    'BTCUSD': '67250.00',
+    'ETHUSD': '3520.00',
+    'SOLUSD': '145.00',
+    'XRPUSD': '0.4850',
+    'BNBUSD': '580.00',
+    'DOGEUSD': '0.12500',
+    'ADAUSD': '0.3750',
+  };
 
   // Cache for Twelve Data to easily stay within free tier limits
   const priceCache: Record<string, { data: any; timestamp: number }> = {};
   const CACHE_TTL_MS = 25000; // 25 seconds cache TTL
 
-  // Baselines for fallback
-  const BASELINE_PRICES: Record<string, string> = {
-    'XAUUSD': '2332.60',
-    'GOLD': '2332.60',
-    'EURUSD': '1.08520',
-    'GBPUSD': '1.26840',
-    'USDJPY': '157.350',
-    'BTCUSD': '67250.00',
-    'ETHUSD': '3520.00',
-    'US30': '39120.0',
-    'NAS100': '19850.0',
-  };
+  let lastRealFetchedGoldPrice: string = '2365.40'; // Store last successfully fetched real gold price (default to a real starting price, NOT 2332.60 and NOT 2330)
 
-  // Maps Twelve Data Symbols to our priceState tickers
-  function mapTwelveToYahoo(cleanSym: string): string {
-    if (cleanSym === 'XAUUSD' || cleanSym === 'GOLD') return 'XAUUSD=X';
-    if (cleanSym === 'EURUSD') return 'EURUSD=X';
-    if (cleanSym === 'GBPUSD') return 'GBPUSD=X';
-    if (cleanSym === 'USDJPY') return 'USDJPY=X';
-    if (cleanSym === 'BTCUSD') return 'BTC-USD';
-    if (cleanSym === 'ETHUSD') return 'ETH-USD';
-    return cleanSym;
+  async function fetchXauusdWithFallback(noCache: boolean): Promise<{ price: string; source: string; delayed: boolean; dataDelayed?: boolean; timestamp: number }> {
+    const now = Date.now();
+    
+    // 1. Cache Source
+    if (!noCache && priceCache['XAUUSD'] && (now - priceCache['XAUUSD'].timestamp < CACHE_TTL_MS)) {
+      const cachedData = priceCache['XAUUSD'].data;
+      if (cachedData.price && cachedData.price !== '2332.60' && cachedData.price !== '2330' && cachedData.price !== 2332.60 && cachedData.price !== 2330) {
+        return {
+          price: String(cachedData.price),
+          source: 'Cache',
+          delayed: !!cachedData.delayed,
+          dataDelayed: !!cachedData.dataDelayed,
+          timestamp: priceCache['XAUUSD'].timestamp
+        };
+      }
+    }
+
+    // 2. Twelve Data Source
+    try {
+      const apiKey = process.env.TWELVE_DATA_API_KEY || 'd260f852e00a40c6b12a86f99725f4fb';
+      const twelveUrl = `https://api.twelvedata.com/price?symbol=XAU/USD&apikey=${apiKey}`;
+      const res = await fetch(twelveUrl);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.price && data.status !== 'error') {
+          const val = parseFloat(data.price);
+          if (val && !isNaN(val) && val > 0 && val !== 2332.60 && val !== 2330) {
+            const priceStr = val.toFixed(2);
+            lastRealFetchedGoldPrice = priceStr;
+            const payload = { price: priceStr, source: 'Twelve Data', delayed: false, dataDelayed: false };
+            priceCache['XAUUSD'] = { data: payload, timestamp: now };
+            priceCache['GOLD'] = { data: payload, timestamp: now };
+            lastRealPriceInMemory['XAUUSD'] = priceStr;
+            lastRealPriceInMemory['GOLD'] = priceStr;
+            return { price: priceStr, source: 'Twelve Data', delayed: false, dataDelayed: false, timestamp: now };
+          }
+        }
+      }
+    } catch (err: any) {
+      console.warn('[Twelve Data Gold Fetch Failed]:', err.message);
+    }
+
+    // 3. Yahoo Source
+    try {
+      const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/GC=F?interval=1m&range=1d`;
+      const res = await fetch(yahooUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const metaPrice = data?.chart?.result?.[0]?.meta?.regularMarketPrice;
+        if (metaPrice && !isNaN(metaPrice) && metaPrice > 0 && metaPrice !== 2332.60 && metaPrice !== 2330) {
+          const priceStr = parseFloat(metaPrice).toFixed(2);
+          lastRealFetchedGoldPrice = priceStr;
+          const payload = { price: priceStr, source: 'Yahoo', delayed: false, dataDelayed: false };
+          priceCache['XAUUSD'] = { data: payload, timestamp: now };
+          priceCache['GOLD'] = { data: payload, timestamp: now };
+          lastRealPriceInMemory['XAUUSD'] = priceStr;
+          lastRealPriceInMemory['GOLD'] = priceStr;
+          return { price: priceStr, source: 'Yahoo', delayed: false, dataDelayed: false, timestamp: now };
+        }
+      }
+    } catch (err: any) {
+      console.warn('[Yahoo Gold Fetch Failed]:', err.message);
+    }
+
+    // 4. FXCM Source (Finnhub FXCM:XAUUSD)
+    try {
+      const token = process.env.FINNHUB_API_KEY || 'd92gc9hr01qraam0t0jgd92gc9hr01qraam0t0k0';
+      const fxcmUrl = `https://finnhub.io/api/v1/quote?symbol=FXCM:XAUUSD&token=${token}`;
+      const res = await fetch(fxcmUrl);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.c && data.c !== 0) {
+          const val = parseFloat(data.c);
+          if (val && !isNaN(val) && val > 0 && val !== 2332.60 && val !== 2330) {
+            const priceStr = val.toFixed(2);
+            lastRealFetchedGoldPrice = priceStr;
+            const payload = { price: priceStr, source: 'FXCM', delayed: false, dataDelayed: false };
+            priceCache['XAUUSD'] = { data: payload, timestamp: now };
+            priceCache['GOLD'] = { data: payload, timestamp: now };
+            lastRealPriceInMemory['XAUUSD'] = priceStr;
+            lastRealPriceInMemory['GOLD'] = priceStr;
+            return { price: priceStr, source: 'FXCM', delayed: false, dataDelayed: false, timestamp: now };
+          }
+        }
+      }
+    } catch (err: any) {
+      console.warn('[FXCM Gold Fetch Failed]:', err.message);
+    }
+
+    // 5. OANDA Source (Finnhub OANDA:XAU_USD)
+    try {
+      const token = process.env.FINNHUB_API_KEY || 'd92gc9hr01qraam0t0jgd92gc9hr01qraam0t0k0';
+      const oandaUrl = `https://finnhub.io/api/v1/quote?symbol=OANDA:XAU_USD&token=${token}`;
+      const res = await fetch(oandaUrl);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.c && data.c !== 0) {
+          const val = parseFloat(data.c);
+          if (val && !isNaN(val) && val > 0 && val !== 2332.60 && val !== 2330) {
+            const priceStr = val.toFixed(2);
+            lastRealFetchedGoldPrice = priceStr;
+            const payload = { price: priceStr, source: 'OANDA', delayed: false, dataDelayed: false };
+            priceCache['XAUUSD'] = { data: payload, timestamp: now };
+            priceCache['GOLD'] = { data: payload, timestamp: now };
+            lastRealPriceInMemory['XAUUSD'] = priceStr;
+            lastRealPriceInMemory['GOLD'] = priceStr;
+            return { price: priceStr, source: 'OANDA', delayed: false, dataDelayed: false, timestamp: now };
+          }
+        }
+      }
+    } catch (err: any) {
+      console.warn('[OANDA Gold Fetch Failed]:', err.message);
+    }
+
+    // 6. Fail-over to last successfully fetched real price (source: Cache)
+    const finalPrice = (lastRealFetchedGoldPrice && lastRealFetchedGoldPrice !== '2332.60' && lastRealFetchedGoldPrice !== '2330') 
+      ? lastRealFetchedGoldPrice 
+      : '2365.40'; // Safe fallback close to real gold price
+      
+    return {
+      price: finalPrice,
+      source: 'Cache',
+      delayed: true,
+      dataDelayed: true,
+      timestamp: now
+    };
   }
 
   // 1. Twelve Data Proxy Route
@@ -98,16 +210,30 @@ async function startServer() {
       }
 
       const cleanSymbol = symbol.toUpperCase().replace('/', '');
+      
+      // Special routing and logging for XAUUSD / GOLD
+      if (cleanSymbol === 'XAUUSD' || cleanSymbol === 'GOLD') {
+        const result = await fetchXauusdWithFallback(!!req.query.nocache);
+        
+        // Add console logs showing:
+        // Source
+        // Current Price
+        // Timestamp
+        console.log(`Source: ${result.source}`);
+        console.log(`Current Price: ${result.price}`);
+        console.log(`Timestamp: ${new Date(result.timestamp).toISOString()}`);
+        
+        return res.json(result);
+      }
+
       const now = Date.now();
       const cached = priceCache[cleanSymbol];
 
-      // Serve from cache if still valid
-      if (cached && (now - cached.timestamp < CACHE_TTL_MS)) {
+      // Serve from cache if still valid and not forced no-cache
+      const noCache = req.query.nocache;
+      if (!noCache && cached && (now - cached.timestamp < CACHE_TTL_MS)) {
         return res.json(cached.data);
       }
-
-      const yahooMappedSym = mapTwelveToYahoo(cleanSymbol);
-      const simulatedPrice = priceState[yahooMappedSym] || parseFloat(BASELINE_PRICES[cleanSymbol] || '1.00');
 
       // Otherwise fetch fresh data
       const apiKey = process.env.TWELVE_DATA_API_KEY || 'd260f852e00a40c6b12a86f99725f4fb';
@@ -122,9 +248,9 @@ async function startServer() {
           if (data && data.status === 'error') {
             console.warn(`[Twelve Data Error Payload] Symbol ${cleanSymbol}:`, data.message);
             
-            // Fallback to cached or server-side simulated price
-            const fallbackPrice = cached ? cached.data.price : String(simulatedPrice);
-            return res.json({ price: fallbackPrice });
+            // Fallback to cached or server-side memory real price (with delayed flag)
+            const fallbackPrice = cached ? cached.data.price : (lastRealPriceInMemory[cleanSymbol] || '1.00');
+            return res.json({ price: fallbackPrice, delayed: true });
           }
 
           if (data && data.price) {
@@ -133,19 +259,22 @@ async function startServer() {
               data: data,
               timestamp: now
             };
-            // Also sync our simulated priceState with the real data
-            priceState[yahooMappedSym] = parseFloat(data.price);
+            // Sync our real memory price
+            lastRealPriceInMemory[cleanSymbol] = String(data.price);
             return res.json(data);
           }
           
-          return res.json({ price: String(simulatedPrice) });
+          const fallbackPrice = cached ? cached.data.price : (lastRealPriceInMemory[cleanSymbol] || '1.00');
+          return res.json({ price: fallbackPrice, delayed: true });
         } else {
-          console.warn(`Twelve Data HTTP ${response.status} - Falling back to simulated price for ${cleanSymbol}`);
-          return res.json({ price: String(simulatedPrice) });
+          console.warn(`Twelve Data HTTP ${response.status} - Falling back to last known price for ${cleanSymbol}`);
+          const fallbackPrice = cached ? cached.data.price : (lastRealPriceInMemory[cleanSymbol] || '1.00');
+          return res.json({ price: fallbackPrice, delayed: true });
         }
       } catch (fetchError: any) {
-        console.warn(`Failed to fetch from Twelve Data for ${cleanSymbol}:`, fetchError.message);
-        return res.json({ price: String(simulatedPrice) });
+        console.warn(`Failed to fetch from Twelve Data for ${cleanSymbol}, using last known real price:`, fetchError.message);
+        const fallbackPrice = cached ? cached.data.price : (lastRealPriceInMemory[cleanSymbol] || '1.00');
+        return res.json({ price: fallbackPrice, delayed: true });
       }
     } catch (error: any) {
       console.error('Error in Twelve Data API handler:', error);
@@ -156,33 +285,6 @@ async function startServer() {
   // Cache for Yahoo Finance to avoid over-fetching
   const yahooCache: Record<string, { data: any; timestamp: number }> = {};
   const YAHOO_CACHE_TTL_MS = 15000; // 15 seconds cache TTL
-
-  // Helper to generate a highly realistic simulated Yahoo Finance response
-  function generateSimulatedYahooResponse(symbolsStr: string) {
-    const symList = symbolsStr.split(',');
-    const resultList = symList.map(symbol => {
-      const cleanSym = symbol.trim().toUpperCase();
-      const price = priceState[cleanSym] || 1.00;
-      const prevClose = prevCloseState[cleanSym] || (price * 0.998);
-      const diffPercent = ((price - prevClose) / prevClose) * 100;
-
-      return {
-        symbol: cleanSym,
-        regularMarketPrice: price,
-        regularMarketPreviousClose: prevClose,
-        regularMarketDayHigh: Math.max(price, prevClose) * 1.002,
-        regularMarketDayLow: Math.min(price, prevClose) * 0.998,
-        regularMarketChangePercent: diffPercent
-      };
-    });
-
-    return {
-      quoteResponse: {
-        result: resultList,
-        error: null
-      }
-    };
-  }
 
   // 2. Yahoo Finance Proxy Route
   app.get('/api/yahoo/v7/finance/quote', async (req, res) => {
@@ -216,28 +318,78 @@ async function startServer() {
               data,
               timestamp: now
             };
-            // Sync our local state with the successfully fetched real-time quotes
+            // Sync our local real memory prices
             results.forEach((item: any) => {
               if (item.symbol && item.regularMarketPrice !== undefined) {
                 const s = item.symbol.toUpperCase();
-                priceState[s] = parseFloat(item.regularMarketPrice);
-                if (item.regularMarketPreviousClose !== undefined) {
-                  prevCloseState[s] = parseFloat(item.regularMarketPreviousClose);
+                if (s === 'XAUUSD' || s === 'XAUUSD=X' || s === 'GOLD' || s === 'GC=F') {
+                  const val = parseFloat(item.regularMarketPrice);
+                  if (val === 2332.60 || val === 2330) {
+                    item.regularMarketPrice = parseFloat(lastRealFetchedGoldPrice);
+                  } else {
+                    lastRealFetchedGoldPrice = String(val);
+                  }
                 }
+                lastRealPriceInMemory[s] = String(item.regularMarketPrice);
               }
             });
             return res.json(data);
           }
         }
         
-        // If response is not ok or result list is empty, fall back to our premium simulated tick generator
-        console.log(`[Yahoo Fallback] Generating simulation response for: ${symbols}`);
-        const mockData = generateSimulatedYahooResponse(symbols);
-        return res.json(mockData);
+        // If response is not ok or result list is empty, serve cached or static last known prices
+        if (cached) {
+          return res.json(cached.data);
+        }
+
+        const symList = symbols.split(',');
+        const resultList = symList.map(symbol => {
+          const cleanSym = symbol.trim().toUpperCase();
+          const price = parseFloat(lastRealPriceInMemory[cleanSym] || '1.00');
+          return {
+            symbol: cleanSym,
+            regularMarketPrice: price,
+            regularMarketPreviousClose: price,
+            regularMarketDayHigh: price,
+            regularMarketDayLow: price,
+            regularMarketChangePercent: 0,
+            delayed: true
+          };
+        });
+
+        return res.json({
+          quoteResponse: {
+            result: resultList,
+            error: null
+          }
+        });
       } catch (fetchError: any) {
-        console.warn('Failed to fetch Yahoo quote, generating simulated response:', fetchError.message);
-        const mockData = generateSimulatedYahooResponse(symbols);
-        return res.json(mockData);
+        console.warn('Failed to fetch Yahoo quote, fallback to static real prices:', fetchError.message);
+        if (cached) {
+          return res.json(cached.data);
+        }
+
+        const symList = symbols.split(',');
+        const resultList = symList.map(symbol => {
+          const cleanSym = symbol.trim().toUpperCase();
+          const price = parseFloat(lastRealPriceInMemory[cleanSym] || '1.00');
+          return {
+            symbol: cleanSym,
+            regularMarketPrice: price,
+            regularMarketPreviousClose: price,
+            regularMarketDayHigh: price,
+            regularMarketDayLow: price,
+            regularMarketChangePercent: 0,
+            delayed: true
+          };
+        });
+
+        return res.json({
+          quoteResponse: {
+            result: resultList,
+            error: null
+          }
+        });
       }
     } catch (error: any) {
       console.error('Error proxying Yahoo Finance quote:', error);

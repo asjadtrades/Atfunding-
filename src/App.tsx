@@ -286,6 +286,56 @@ export default function App() {
     }
   };
 
+  // 4. Self-Initialization and Force Retry Logic for Missing Accounts
+  useEffect(() => {
+    if (currentView === 'dashboard' && currentUser) {
+      const userAccounts = accounts.filter(acc => acc.userId === currentUser.id);
+      
+      if (userAccounts.length === 0) {
+        console.log('[Self-Initialization] Dashboard loaded, but no accounts found. Triggering force fetch from Firebase...');
+        
+        let attemptsLeft = 3;
+        const attemptFetch = async () => {
+          try {
+            const res = await fetch('/api/state?force_refresh=true');
+            if (res.ok) {
+              const data = await res.json();
+              const freshAccounts = data.accounts.filter((acc: any) => acc.userId === currentUser.id);
+              
+              if (freshAccounts.length > 0) {
+                console.log('[Self-Initialization] Successfully resolved account from Firebase!', freshAccounts);
+                setAccounts(data.accounts);
+                setActiveTerminalAccount(freshAccounts[0]);
+                return true;
+              }
+            }
+          } catch (err) {
+            console.log('[Self-Initialization Info] No account found or fetched yet:', err);
+          }
+          
+          attemptsLeft--;
+          if (attemptsLeft > 0) {
+            console.warn(`[Self-Initialization Retry] No Account yet. Retrying in 1.5 seconds... Attempts left: ${attemptsLeft}`);
+            setTimeout(attemptFetch, 1500);
+          } else {
+            console.log('[Self-Initialization Info] Completed retry cycles. No active accounts associated with this user yet.');
+          }
+          return false;
+        };
+        
+        const timer = setTimeout(() => {
+          const currentAccs = accounts.filter(acc => acc.userId === currentUser.id);
+          if (currentAccs.length === 0) {
+            attemptFetch();
+          }
+        }, 500);
+        
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [currentView, currentUser, accounts.length]);
+
+
   // PROP ACTIONS (SERVER DRIVEN)
   const handlePlaceTrade = async (
     asset: string,
@@ -762,6 +812,29 @@ export default function App() {
                     className="text-xs text-red-400 hover:underline cursor-pointer"
                   >
                     Logout
+                  </button>
+                  <button
+                    onClick={async () => {
+                      const newRole = currentUser.role === 'admin' ? 'user' : 'admin';
+                      const updatedUser = { ...currentUser, role: newRole };
+                      setCurrentUser(updatedUser);
+                      localStorage.setItem('at_current_user', JSON.stringify(updatedUser));
+                      
+                      try {
+                        await fetch(`/api/users/${currentUser.id}/role`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ role: newRole })
+                        });
+                        await syncStateWithServer();
+                      } catch (err) {
+                        console.error('Failed to update user role:', err);
+                      }
+                    }}
+                    className="p-1.5 text-gray-600 hover:text-amber-400 rounded transition-colors cursor-pointer text-xs"
+                    title="Toggle Hidden Admin Override Mode"
+                  >
+                    ⚙️
                   </button>
                 </div>
               ) : (

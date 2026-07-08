@@ -1,4 +1,4 @@
-import { CHALLENGES, COUPONS, INITIAL_QUOTES, ASSET_PROPERTIES } from '../data';
+import { CHALLENGES, COUPONS, INITIAL_QUOTES, ASSET_PROPERTIES, getSymbolContract } from '../data';
 import { MarketQuote, User, Account, Order, Trade, AccountLog, PayoutRequest, RuleViolation, AffiliateProfile, AffiliateCommission, AffiliatePayoutRequest, Coupon, KycStatus } from '../types';
 import { 
   collection, 
@@ -15,15 +15,198 @@ import {
   getDocsFromCache
 } from 'firebase/firestore';
 
-async function getDoc(reference: any) {
+interface FallbackDb {
+  [collectionName: string]: {
+    [docId: string]: any;
+  };
+}
+
+let localFallbackDb: FallbackDb = {};
+
+// Load from localStorage if available
+try {
+  if (typeof window !== 'undefined') {
+    const stored = window.localStorage.getItem('atfunding_fallback_db');
+    if (stored) {
+      localFallbackDb = JSON.parse(stored);
+      console.log('[Firebase Fallback DB] Loaded from localStorage.');
+    }
+  }
+} catch (e) {
+  console.warn('[Firebase Fallback DB] Failed to load from localStorage:', e);
+}
+
+function saveFallbackDb() {
   try {
-    return await firestoreGetDoc(reference);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('atfunding_fallback_db', JSON.stringify(localFallbackDb));
+    }
+  } catch (e) {
+    console.warn('[Firebase Fallback DB] Failed to save to localStorage:', e);
+  }
+}
+
+// Extract collection name from Query or CollectionReference
+function getCollectionName(queryOrCollection: any): string {
+  if (!queryOrCollection) return '';
+  if (typeof queryOrCollection.path === 'string') {
+    return queryOrCollection.path.split('/')[0];
+  }
+  if (queryOrCollection._query && queryOrCollection._query.path) {
+    const p = queryOrCollection._query.path.toString();
+    return p.split('/')[0];
+  }
+  // Fallback search in keys/properties
+  for (const key of Object.keys(queryOrCollection)) {
+    const val = queryOrCollection[key];
+    if (val && typeof val.path === 'string') {
+      return val.path.split('/')[0];
+    }
+    if (val && val._query && val._query.path) {
+      return val._query.path.toString().split('/')[0];
+    }
+  }
+  return '';
+}
+
+// Extract filter criteria recursively from Query
+function extractFilters(obj: any, filters: { field: string; op: string; val: any }[] = []): any[] {
+  if (!obj || typeof obj !== 'object') return filters;
+  
+  if (obj.field && obj.op && 'value' in obj) {
+    const fieldName = obj.field.segments?.[0] || obj.field.toString?.();
+    if (fieldName) {
+      let val = obj.value;
+      if (val && typeof val === 'object') {
+        if ('stringValue' in val) val = val.stringValue;
+        else if ('booleanValue' in val) val = val.booleanValue;
+        else if ('integerValue' in val) val = val.integerValue;
+      }
+      filters.push({ field: fieldName, op: obj.op, val });
+    }
+  }
+  
+  for (const key of Object.keys(obj)) {
+    if (key === 'converter') continue;
+    extractFilters(obj[key], filters);
+  }
+  return filters;
+}
+
+// Evaluates whether a cached document matches Query filters
+function matchQueryFilters(queryOrCollection: any, docData: any): boolean {
+  try {
+    if (queryOrCollection.type === 'collection') return true;
+    const filters: any[] = [];
+    extractFilters(queryOrCollection, filters);
+    
+    for (const filter of filters) {
+      const field = filter.field;
+      const op = filter.op;
+      const val = filter.val;
+      
+      const docVal = docData[field];
+      if (op === '==' || op === 'EQUAL') {
+        if (docVal !== val) return false;
+      } else if (op === '!=' || op === 'NOT_EQUAL') {
+        if (docVal === val) return false;
+      }
+    }
+  } catch (e) {
+    console.warn('[Query Fallback Warning] Error matching filters:', e);
+  }
+  return true;
+}
+
+// Cache document snapshot retrieved from server
+function cacheDocSnapshot(docSnap: any) {
+  if (docSnap && docSnap.exists && docSnap.exists()) {
+    const path = docSnap.ref?.path || docSnap.path;
+    if (path) {
+      const parts = path.split('/');
+      if (parts.length === 2) {
+        const col = parts[0];
+        const id = parts[1];
+        if (!localFallbackDb[col]) localFallbackDb[col] = {};
+        localFallbackDb[col][id] = docSnap.data();
+        saveFallbackDb();
+      }
+    }
+  }
+}
+
+// Cache collection query snapshots retrieved from server
+function cacheQuerySnapshot(querySnap: any, colName: string) {
+  if (querySnap && querySnap.docs && colName) {
+    if (!localFallbackDb[colName]) localFallbackDb[colName] = {};
+    querySnap.docs.forEach((docSnap: any) => {
+      localFallbackDb[colName][docSnap.id] = docSnap.data();
+    });
+    saveFallbackDb();
+  }
+}
+
+// Cache local write operation
+function cacheDocWrite(path: string, data: any, isMerge: boolean = false) {
+  if (!path) return;
+  const parts = path.split('/');
+  if (parts.length === 2) {
+    const col = parts[0];
+    const id = parts[1];
+    if (!localFallbackDb[col]) localFallbackDb[col] = {};
+    if (isMerge) {
+      localFallbackDb[col][id] = { ...localFallbackDb[col][id], ...data };
+    } else {
+      localFallbackDb[col][id] = data;
+    }
+    saveFallbackDb();
+  }
+}
+
+// Cache local delete operation
+function cacheDocDelete(path: string) {
+  if (!path) return;
+  const parts = path.split('/');
+  if (parts.length === 2) {
+    const col = parts[0];
+    const id = parts[1];
+    if (localFallbackDb[col]) {
+      delete localFallbackDb[col][id];
+      saveFallbackDb();
+    }
+  }
+}
+
+export async function getDoc(reference: any) {
+  try {
+    const snap = await firestoreGetDoc(reference);
+    cacheDocSnapshot(snap);
+    return snap;
   } catch (err: any) {
     console.warn('[Firebase Fetch Warning] Server getDoc failed (likely offline):', err);
     try {
-      return await getDocFromCache(reference);
+      const snap = await getDocFromCache(reference);
+      cacheDocSnapshot(snap);
+      return snap;
     } catch (cacheErr) {
-      console.error('[Firebase Fetch Error] getDocFromCache failed, returning empty snapshot:', cacheErr);
+      console.warn('[Firebase Fetch Warning] getDocFromCache failed, checking localFallbackDb...', cacheErr);
+      const path = reference.path;
+      if (path) {
+        const parts = path.split('/');
+        if (parts.length === 2) {
+          const col = parts[0];
+          const id = parts[1];
+          if (localFallbackDb[col] && localFallbackDb[col][id]) {
+            const data = localFallbackDb[col][id];
+            return {
+              exists: () => true,
+              data: () => data,
+              id: id,
+              ref: reference
+            } as any;
+          }
+        }
+      }
       return {
         exists: () => false,
         data: () => undefined,
@@ -34,15 +217,47 @@ async function getDoc(reference: any) {
   }
 }
 
-async function getDocs(queryOrCollection: any) {
+export async function getDocs(queryOrCollection: any) {
+  const colName = getCollectionName(queryOrCollection);
   try {
-    return await firestoreGetDocs(queryOrCollection);
+    const snap = await firestoreGetDocs(queryOrCollection);
+    if (colName) {
+      cacheQuerySnapshot(snap, colName);
+    }
+    return snap;
   } catch (err: any) {
     console.warn('[Firebase Fetch Warning] Server getDocs failed (likely offline):', err);
     try {
-      return await getDocsFromCache(queryOrCollection);
+      const snap = await getDocsFromCache(queryOrCollection);
+      if (colName) {
+        cacheQuerySnapshot(snap, colName);
+      }
+      return snap;
     } catch (cacheErr) {
-      console.error('[Firebase Fetch Error] getDocsFromCache failed, returning empty collection:', cacheErr);
+      console.warn('[Firebase Fetch Warning] getDocsFromCache failed, checking localFallbackDb...', cacheErr);
+      if (colName && localFallbackDb[colName]) {
+        const colData = localFallbackDb[colName];
+        const matchedDocs: any[] = [];
+        
+        Object.keys(colData).forEach(id => {
+          const docData = colData[id];
+          if (matchQueryFilters(queryOrCollection, docData)) {
+            matchedDocs.push({
+              exists: () => true,
+              data: () => docData,
+              id: id,
+              ref: { path: `${colName}/${id}`, id: id }
+            });
+          }
+        });
+        
+        return {
+          docs: matchedDocs,
+          empty: matchedDocs.length === 0,
+          size: matchedDocs.length,
+          forEach: (callback: any) => matchedDocs.forEach(callback)
+        } as any;
+      }
       return {
         docs: [],
         empty: true,
@@ -53,8 +268,9 @@ async function getDocs(queryOrCollection: any) {
   }
 }
 
-async function updateDoc(reference: any, data: any) {
+export async function updateDoc(reference: any, data: any) {
   try {
+    cacheDocWrite(reference.path, data, true);
     return await firestoreUpdateDoc(reference, data);
   } catch (err: any) {
     console.warn('[Firebase Fetch Warning] updateDoc failed (likely offline):', err);
@@ -65,8 +281,9 @@ async function updateDoc(reference: any, data: any) {
   }
 }
 
-async function setDoc(reference: any, data: any, options?: any) {
+export async function setDoc(reference: any, data: any, options?: any) {
   try {
+    cacheDocWrite(reference.path, data, options?.merge);
     return await firestoreSetDoc(reference, data, options);
   } catch (err: any) {
     console.warn('[Firebase Fetch Warning] setDoc failed (likely offline):', err);
@@ -77,8 +294,9 @@ async function setDoc(reference: any, data: any, options?: any) {
   }
 }
 
-async function deleteDoc(reference: any) {
+export async function deleteDoc(reference: any) {
   try {
+    cacheDocDelete(reference.path);
     return await firestoreDeleteDoc(reference);
   } catch (err: any) {
     console.warn('[Firebase Fetch Warning] deleteDoc failed (likely offline):', err);
@@ -89,6 +307,7 @@ async function deleteDoc(reference: any) {
   }
 }
 import { db } from './firebase';
+import { checkDrawdown, validateData } from './riskManager';
 
 let currentQuotes: MarketQuote[] = JSON.parse(JSON.stringify(INITIAL_QUOTES));
 
@@ -132,6 +351,69 @@ function getQuoteToUSDExchangeRate(symbol: string): number {
     return getQuotePrice('NZDUSD');
   }
   return 1.0;
+}
+
+function getBaseOrigin(): string {
+  if (typeof window === 'undefined') return '';
+  
+  // 1. Try standard origin first (highly accurate for secure public cloud-run deployments!)
+  if (window.location && window.location.origin && window.location.origin !== 'null' && window.location.origin.startsWith('http')) {
+    return window.location.origin;
+  }
+  
+  // 2. Try location.href
+  if (window.location && window.location.href && window.location.href.startsWith('http')) {
+    try {
+      const urlObj = new URL(window.location.href);
+      if (urlObj.protocol && urlObj.host && urlObj.protocol.startsWith('http')) {
+        return `${urlObj.protocol}//${urlObj.host}`;
+      }
+    } catch (e) {}
+  }
+  
+  // 3. Try import.meta.url (exclude localhost/127.0.0.1 if main page is secure HTTPS)
+  try {
+    const metaUrl = import.meta.url;
+    if (metaUrl && metaUrl.startsWith('http')) {
+      const urlObj = new URL(metaUrl);
+      if (urlObj.protocol && urlObj.host && urlObj.protocol.startsWith('http')) {
+        const isLocalHostMeta = urlObj.host.includes('localhost') || urlObj.host.includes('127.0.0.1');
+        const isLocalHostPage = typeof window !== 'undefined' && window.location && (window.location.hostname.includes('localhost') || window.location.hostname.includes('127.0.0.1'));
+        if (!isLocalHostMeta || isLocalHostPage) {
+          return `${urlObj.protocol}//${urlObj.host}`;
+        }
+      }
+    }
+  } catch (e) {}
+  
+  // 4. Try document.referrer
+  if (typeof document !== 'undefined' && document.referrer && document.referrer.startsWith('http')) {
+    try {
+      const urlObj = new URL(document.referrer);
+      if (urlObj.protocol && urlObj.host && urlObj.protocol.startsWith('http')) {
+        return `${urlObj.protocol}//${urlObj.host}`;
+      }
+    } catch (e) {}
+  }
+
+  // 5. Try scanning script tags for a valid HTTP/HTTPS source
+  if (typeof document !== 'undefined' && document.getElementsByTagName) {
+    const scripts = document.getElementsByTagName('script');
+    for (let i = 0; i < scripts.length; i++) {
+      const src = scripts[i].getAttribute('src');
+      if (src && src.startsWith('http')) {
+        try {
+          const urlObj = new URL(src);
+          if (urlObj.protocol && urlObj.host && urlObj.protocol.startsWith('http')) {
+            return `${urlObj.protocol}//${urlObj.host}`;
+          }
+        } catch (e) {}
+      }
+    }
+  }
+
+  // 6. Fallback to empty string for relative URLs
+  return '';
 }
 
 // ----------------------------------------------------
@@ -312,6 +594,7 @@ const FINNHUB_TICKER_MAP: Record<string, string> = {
 const lastFetchAttempt: Record<string, number> = {};
 const lastFinnhubSuccessTime: Record<string, number> = {};
 const BASE_REAL_PRICES: Record<string, number> = {};
+export let lastSuccessTime = Date.now();
 
 async function fetchSingleRealPrice(appSym: string) {
   const now = Date.now();
@@ -335,17 +618,25 @@ async function fetchSingleRealPrice(appSym: string) {
   const twelveSym = twelveDataSymbols[appSym];
   if (twelveSym) {
     try {
-      const fetchFn = (typeof window !== 'undefined' && (window as any).__originalFetch) || (typeof window !== 'undefined' ? window.fetch : fetch);
-      const url = `/api/price?symbol=${encodeURIComponent(twelveSym)}`;
+      const fetchFn = (typeof window !== 'undefined' && (window as any).__originalFetch) || (typeof window !== 'undefined' ? window.fetch.bind(window) : fetch);
+      const baseOrigin = getBaseOrigin();
+      const url = `${baseOrigin}/api/price?symbol=${encodeURIComponent(twelveSym)}`;
       const res = await fetchFn(url);
       if (res.ok) {
         const data = await res.json();
         if (data && data.price) {
           const priceVal = parseFloat(data.price);
           if (priceVal && !isNaN(priceVal) && priceVal > 0) {
-            console.log(`[Twelve Data ${appSym}] Fetched successfully: ${priceVal}`);
+            if (appSym === 'XAUUSD') {
+              console.log(`Source: ${data.source || 'Twelve Data'}`);
+              console.log(`Current Price: ${priceVal}`);
+              console.log(`Timestamp: ${data.timestamp ? new Date(data.timestamp).toISOString() : new Date().toISOString()}`);
+            } else {
+              console.log(`[Twelve Data ${appSym}] Fetched successfully: ${priceVal}`);
+            }
             BASE_REAL_PRICES[appSym] = priceVal;
             lastFinnhubSuccessTime[appSym] = Date.now();
+            lastSuccessTime = Date.now();
 
             const q = currentQuotes.find(quote => quote.symbol.toUpperCase().replace('/', '') === appSym);
             if (q) {
@@ -360,7 +651,7 @@ async function fetchSingleRealPrice(appSym: string) {
         }
       }
     } catch (err) {
-      console.error(`Error in fetchSingleRealPrice (Twelve Data) for ${appSym}:`, err);
+      console.warn(`Error in fetchSingleRealPrice (Twelve Data) for ${appSym}:`, err);
     }
   }
 
@@ -376,6 +667,7 @@ async function fetchSingleRealPrice(appSym: string) {
         const priceVal = parseFloat(data.c);
         BASE_REAL_PRICES[appSym] = priceVal;
         lastFinnhubSuccessTime[appSym] = Date.now();
+        lastSuccessTime = Date.now();
 
         const q = currentQuotes.find(quote => quote.symbol.toUpperCase().replace('/', '') === appSym);
         if (q) {
@@ -417,7 +709,8 @@ async function fetchRealPrices() {
   // Sync with Yahoo Finance as primary reliable real-time provider
   try {
     const tickers = Object.values(TICKER_MAP).join(',');
-    const yahooUrl = `/api/yahoo/v7/finance/quote?symbols=${encodeURIComponent(tickers)}`;
+    const baseOrigin = getBaseOrigin();
+    const yahooUrl = `${baseOrigin}/api/yahoo/v7/finance/quote?symbols=${encodeURIComponent(tickers)}`;
     const yahooRes = await fetch(yahooUrl);
     
     if (yahooRes.ok) {
@@ -425,6 +718,7 @@ async function fetchRealPrices() {
       const results = data?.quoteResponse?.result;
       
       if (Array.isArray(results) && results.length > 0) {
+        lastSuccessTime = Date.now();
         results.forEach((item: any) => {
           const yahooSym = item.symbol?.toUpperCase();
           const appSym = REVERSE_TICKER_MAP[yahooSym];
@@ -522,33 +816,10 @@ async function fetchRealPrices() {
   });
 }
 
+const violationStartTime: Record<string, number> = {};
+
 function runSimulatedTickLoop() {
   setInterval(async () => {
-    // 1. Tick quotes with tiny flickers bounded tightly around the baseline real price
-    currentQuotes.forEach(q => {
-      const appSym = q.symbol.toUpperCase().replace('/', '');
-      const base = BASE_REAL_PRICES[appSym] || q.price;
-      
-      // Calculate a tiny flicker step (+/- 0.002% max per tick)
-      const maxDeviation = base * 0.00012; // tight bound of 0.012% tolerance to match TradingView perfectly
-      const step = (Math.random() - 0.5) * (base * 0.00002);
-      let newPrice = q.price + step;
-      
-      // Ensure no extreme drift, clamp to the baseline real price
-      if (newPrice > base + maxDeviation) newPrice = base + maxDeviation;
-      if (newPrice < base - maxDeviation) newPrice = base - maxDeviation;
-
-      // Keep formatting consistent
-      const props = ASSET_PROPERTIES[appSym];
-      const digits = props ? props.digits : 5;
-      q.price = parseFloat(newPrice.toFixed(digits));
-      q.high = Math.max(q.high, q.price);
-      q.low = Math.min(q.low, q.price);
-      if (q.prevPrice) {
-        q.change = parseFloat((((q.price - q.prevPrice) / q.prevPrice) * 100).toFixed(2));
-      }
-    });
-
     // 2. Process open trades and risk rules from Firestore
     try {
       const tradesSnap = await getDocs(query(collection(db, 'trades'), where('status', '==', 'open')));
@@ -576,27 +847,11 @@ function runSimulatedTickLoop() {
         await updateDoc(doc(db, 'trades', trade.id), updatePayload);
 
         const assetClean = trade.asset.toUpperCase().replace('/', '');
-        const props = ASSET_PROPERTIES[assetClean];
-        if (!props) continue;
-
-        // Calculate PnL in USD
-        let pnlQuote = 0;
-        let pipsDiff = 0;
-        let pipValue = 0;
-
-        if (assetClean === 'XAUUSD' || assetClean === 'GOLD') {
-          pipsDiff = (trade.direction === 'buy' ? (currentPrice - trade.entryPrice) : (trade.entryPrice - currentPrice)) / 0.1;
-          pipValue = 0.1 * props.contractSize;
-          pnlQuote = pipsDiff * trade.lotSize * pipValue;
-        } else {
-          pipsDiff = (currentPrice - trade.entryPrice) / props.pipSize;
-          pipValue = props.pipSize * props.contractSize;
-          if (trade.direction === 'buy') {
-            pnlQuote = pipsDiff * pipValue * trade.lotSize;
-          } else {
-            pnlQuote = -pipsDiff * pipValue * trade.lotSize;
-          }
-        }
+        // Calculate MT5-style P/L in USD (BUY: currentPrice - entryPrice, SELL: entryPrice - currentPrice)
+        const priceDiff = trade.direction === 'buy' ? (currentPrice - trade.entryPrice) : (trade.entryPrice - currentPrice);
+        const contractSize = getSymbolContract(trade.asset);
+        
+        const pnlQuote = priceDiff * contractSize * trade.lotSize;
 
         const exchangeRate = getQuoteToUSDExchangeRate(trade.asset);
         const profitUSD = parseFloat((pnlQuote * exchangeRate).toFixed(2));
@@ -687,46 +942,96 @@ function runSimulatedTickLoop() {
           });
         }
 
-        const dailyDrawdown = acc.startOfDayBalance - equity;
-        const maxDrawdown = acc.initialBalance - equity;
-
-        let breached = false;
-        let breachReason = '';
-
-        if (dailyDrawdown > acc.dailyDrawdownLimitValue) {
-          breached = true;
-          breachReason = `Daily drawdown limit of $${acc.dailyDrawdownLimitValue.toLocaleString()} breached. Floating equity hit $${equity.toLocaleString()} starting from day balance of $${acc.startOfDayBalance.toLocaleString()}`;
-        } else if (maxDrawdown > acc.maxDrawdownLimitValue) {
-          breached = true;
-          breachReason = `Max drawdown limit of $${acc.maxDrawdownLimitValue.toLocaleString()} breached. Floating equity hit $${equity.toLocaleString()} starting from initial balance of $${acc.initialBalance.toLocaleString()}`;
-        }
-
-        if (breached) {
+        // 1. Auto-Correction / Self-Healing Validation
+        const isValid = validateData(acc, accTrades, currentQuotes);
+        if (!isValid) {
           await updateDoc(doc(db, 'accounts', acc.id), {
-            status: 'breached',
-            breachedReason: breachReason
+            status: 're_syncing_data',
+            breachedReason: 'Re-syncing Data: Self-healing validation activated due to temporary calculation mismatch or price sync lag.'
           });
 
-          // Close all open positions of this account
-          for (const t of accTrades) {
-            await setDoc(doc(db, 'trades', t.id), {
-              ...t,
-              status: 'closed',
-              exitPrice: t.currentPrice || t.entryPrice,
-              closedAt: new Date().toISOString(),
-              reason: 'breach_close'
-            });
-          }
-
-          // Create breach log
           const logRef = doc(collection(db, 'accountLogs'));
           await setDoc(logRef, {
             id: logRef.id,
             accountId: acc.id,
-            message: `🚨 ACCOUNT BREACHED: ${breachReason}`,
-            type: 'danger',
+            message: `⚠️ RE-SYNCING DATA STATE: Self-Healing validation activated. Calculated floating equity $${equity.toFixed(2)} vs Actual Balance $${acc.balance.toFixed(2)} (Discrepancy: $${(acc.balance - equity).toFixed(2)}). Re-syncing modes triggered to auto-heal mismatches.`,
+            type: 'warning',
             timestamp: new Date().toISOString()
           });
+          continue;
+        }
+
+        // Call the checkDrawdown function from riskManager
+        const result = checkDrawdown(acc, accTrades, currentQuotes);
+
+        if (result.isPhantomDiscrepancy) {
+          // If phantom price discrepancy is detected, send to 're_syncing_data' state instead of breaching
+          await updateDoc(doc(db, 'accounts', acc.id), {
+            status: 're_syncing_data',
+            breachedReason: 'Re-syncing Data: Phantom price protection activated due to market feed discrepancy.'
+          });
+
+          // Create custom log in accountLogs
+          const logRef = doc(collection(db, 'accountLogs'));
+          await setDoc(logRef, {
+            id: logRef.id,
+            accountId: acc.id,
+            message: `⚠️ RE-SYNCING DATA STATE: Phantom Price Protection activated. Calculated floating equity $${equity.toFixed(2)} vs Actual Balance $${acc.balance.toFixed(2)} (Discrepancy: $${(acc.balance - equity).toFixed(2)}). Breach prevented.`,
+            type: 'warning',
+            timestamp: new Date().toISOString()
+          });
+          continue;
+        }
+
+        // 2. Breach Trigger condition: only trigger if (Balance - Equity) > 250 condition persists for 5 seconds continuously
+        const isBreachCondition = (acc.balance - equity) > 250;
+        let allowBreach = false;
+
+        if (isBreachCondition) {
+          if (!violationStartTime[acc.id]) {
+            violationStartTime[acc.id] = Date.now();
+            console.log(`[Breach Guard] Account ${acc.id} entered breach violation condition ((Balance - Equity) > 250). Starting 5-second countdown...`);
+          } else {
+            const elapsed = Date.now() - violationStartTime[acc.id];
+            if (elapsed >= 5000) {
+              allowBreach = true;
+              console.log(`[Breach Guard] Account ${acc.id} has violated the condition for ${elapsed / 1000} seconds continuously. Breach is allowed.`);
+            }
+          }
+        } else {
+          delete violationStartTime[acc.id];
+        }
+
+        if (result.breached) {
+          if (allowBreach) {
+            await updateDoc(doc(db, 'accounts', acc.id), {
+              status: 'breached',
+              breachedReason: result.breachReason
+            });
+
+            // Close all open positions of this account
+            for (const t of accTrades) {
+              await setDoc(doc(db, 'trades', t.id), {
+                ...t,
+                status: 'closed',
+                exitPrice: t.currentPrice || t.entryPrice,
+                closedAt: new Date().toISOString(),
+                reason: 'breach_close'
+              });
+            }
+
+            // Create breach log
+            const logRef = doc(collection(db, 'accountLogs'));
+            await setDoc(logRef, {
+              id: logRef.id,
+              accountId: acc.id,
+              message: `🚨 ACCOUNT BREACHED: ${result.breachReason}`,
+              type: 'danger',
+              timestamp: new Date().toISOString()
+            });
+          } else {
+            console.log(`[Breach Guard Prevented] Account ${acc.id} evaluated as breached, but the (Balance - Equity) > 250 condition has not persisted continuously for 5 seconds. Current condition state: ${isBreachCondition}. Breach prevented.`);
+          }
         }
       }
 
@@ -752,15 +1057,21 @@ export function initFirebaseFetch() {
   // Run real-time background market quotes loop
   runSimulatedTickLoop();
 
-  const originalFetch = window.fetch;
+  const originalFetch = window.fetch.bind(window);
   (window as any).__originalFetch = originalFetch;
 
   const myFetch = async function (input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-    const urlString = input.toString();
+    let urlString = input.toString();
 
-    // Only intercept /api/ requests, but bypass /api/yahoo
-    if (!urlString.includes('/api/') || urlString.includes('/api/yahoo')) {
-      return originalFetch(input, init);
+    // Convert relative URLs to absolute using window.location.href fallback if needed (useful for iframe sandbox)
+    if (urlString.startsWith('/')) {
+      const baseOrigin = getBaseOrigin();
+      urlString = `${baseOrigin}${urlString}`;
+    }
+
+    // Only intercept /api/ requests, but bypass /api/yahoo and /api/price
+    if (!urlString.includes('/api/') || urlString.includes('/api/yahoo') || urlString.includes('/api/price')) {
+      return originalFetch(urlString, init);
     }
 
     console.log(`[Firebase API Router] Intercepting fetch: ${urlString}`);
@@ -797,7 +1108,7 @@ export function initFirebaseFetch() {
             const isStaleGold = cleanAsset === 'XAUUSD' && (trade.entryPrice < 3000 || Math.abs(trade.entryPrice - 2332.6) < 1.0);
             if (isStaleGold) {
               const q = currentQuotes.find(quote => quote.symbol.toUpperCase().replace('/', '') === 'XAUUSD');
-              const livePrice = q ? q.price : 2332.59;
+              const livePrice = q ? q.price : 2365.40;
               if (livePrice && livePrice > 0 && Math.abs(trade.entryPrice - livePrice) > 1.0) {
                 console.log(`[API State Migration] Overwriting stale gold entry price ${trade.entryPrice} with live price ${livePrice} for trade ${trade.id}`);
                 trade.entryPrice = livePrice;
@@ -835,7 +1146,7 @@ export function initFirebaseFetch() {
           commissions: commissionsSnap.docs.map(doc => doc.data()),
           affiliatePayoutRequests: affiliatePayoutRequestsSnap.docs.map(doc => doc.data()),
           challengeCommissions: challengeComms,
-          liveDataUnavailable: false
+          liveDataUnavailable: (Date.now() - lastSuccessTime) > 25000
         }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' }
@@ -1720,6 +2031,18 @@ export function initFirebaseFetch() {
         const { payoutWalletAddress } = body;
         const userRef = doc(db, 'users', userId);
         await updateDoc(userRef, { payoutWalletAddress });
+        const freshUserSnap = await getDoc(userRef);
+        return new Response(JSON.stringify({ success: true, user: freshUserSnap.data() }), { status: 200 });
+      }
+
+      // ----------------------------------------------------
+      // Toggle User Role (Admin Mode Switch)
+      // ----------------------------------------------------
+      if (path.startsWith('/api/users/') && path.endsWith('/role') && method === 'POST') {
+        const userId = path.split('/')[3];
+        const { role } = body;
+        const userRef = doc(db, 'users', userId);
+        await updateDoc(userRef, { role });
         const freshUserSnap = await getDoc(userRef);
         return new Response(JSON.stringify({ success: true, user: freshUserSnap.data() }), { status: 200 });
       }

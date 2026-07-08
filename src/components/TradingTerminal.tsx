@@ -8,7 +8,7 @@ import {
 import { 
   User, Account, Trade, MarketQuote, Candle, OrderType, TradeDirection, AccountLog, RuleViolation 
 } from '../types';
-import { ASSET_PROPERTIES } from '../data';
+import { ASSET_PROPERTIES, getSymbolContract, getSymbolTick } from '../data';
 import { useMarketDataContext, useMarketPrice } from '../context/MarketDataContext';
 
 const getTradingViewSymbol = (symbol: string): string => {
@@ -229,25 +229,22 @@ export default function TradingTerminal({
     const props = ASSET_PROPERTIES[cleanSym] || { contractSize: 100000 };
     const contractSize = props.contractSize;
 
-    let profitLoss = 0;
+    // BUY: targetPrice - entryPrice, SELL: entryPrice - targetPrice
+    const priceDifference = p.direction === 'buy' ? (targetPrice - p.entryPrice) : (p.entryPrice - targetPrice);
+
+    let rawPnL = 0;
     if (cleanSym === 'XAUUSD' || cleanSym === 'GOLD') {
-      const pipDifference = (p.direction === 'buy' ? (targetPrice - p.entryPrice) : (p.entryPrice - targetPrice)) / 0.1;
-      const pipValueInUSD = 0.1 * contractSize; // Adjusted for contract size
-      profitLoss = pipDifference * p.lotSize * pipValueInUSD;
+      rawPnL = priceDifference * 100 * p.lotSize;
     } else {
-      if (p.direction === 'buy') {
-        profitLoss = (targetPrice - p.entryPrice) * p.lotSize * contractSize;
-      } else {
-        profitLoss = (p.entryPrice - targetPrice) * p.lotSize * contractSize;
-      }
+      rawPnL = priceDifference * contractSize * p.lotSize;
     }
 
     // Convert Quote Currency to USD with 100% MT5 accuracy
     const conversionRate = getClientQuoteToUSDExchangeRate(asset);
-    profitLoss = profitLoss * conversionRate;
-
-    return profitLoss;
+    return rawPnL * conversionRate;
   }
+
+  const { getMarketPrice } = useMarketDataContext();
 
   const [activeSymbol, setActiveSymbol] = useState<string>(() => {
     return localStorage.getItem('active_trading_symbol') || 'EUR/USD';
@@ -259,6 +256,62 @@ export default function TradingTerminal({
 
   const [timeframe, setTimeframe] = useState<'1m' | '5m' | '15m' | '1H' | '4H' | '1D'>('1m');
   const [activeTab, setActiveTab] = useState<'positions' | 'history' | 'pending' | 'logs' | 'rules'>('positions');
+
+  // ----------------------------------------------------
+  // DEBUGGING PANEL & PRICE SYNC MONITORING STATE
+  // ----------------------------------------------------
+  const [debugChartPrice, setDebugChartPrice] = useState<number | null>(null);
+  const [debugEnginePrice, setDebugEnginePrice] = useState<number | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    const fetchDebugPrices = async () => {
+      try {
+        const cleanSym = activeSymbol.toUpperCase().replace('/', '');
+        const twelveDataSymbols: Record<string, string> = {
+          'XAUUSD': 'XAU/USD',
+          'EURUSD': 'EUR/USD',
+          'GBPUSD': 'GBP/USD',
+          'USDJPY': 'USD/JPY',
+          'BTCUSD': 'BTC/USD',
+          'ETHUSD': 'ETH/USD',
+        };
+        const twelveSym = twelveDataSymbols[cleanSym] || cleanSym;
+
+        // Fetch fresh un-cached price directly from the server-side real market feed (source of truth)
+        const res = await fetch(`/api/price?symbol=${encodeURIComponent(twelveSym)}&nocache=${Date.now()}`);
+        if (res.ok && active) {
+          const data = await res.json();
+          if (data && data.price) {
+            const priceVal = parseFloat(data.price);
+            if (priceVal && !isNaN(priceVal)) {
+              setDebugChartPrice(priceVal);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Error fetching debug chart price:', err);
+      }
+    };
+
+    fetchDebugPrices();
+    const interval = setInterval(fetchDebugPrices, 2000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [activeSymbol]);
+
+  // Sync debugEnginePrice with our live quote feed
+  const liveQuotePrice = getMarketPrice(activeSymbol)?.price || null;
+  useEffect(() => {
+    if (liveQuotePrice) {
+      setDebugEnginePrice(liveQuotePrice);
+    }
+  }, [liveQuotePrice]);
+
+  const debugDifference = debugChartPrice && debugEnginePrice ? Math.abs(debugChartPrice - debugEnginePrice) : 0;
+  const showPriceDesyncWarning = debugDifference > 0.05;
   
   // Rule Warning state
   const [acknowledgedViolations, setAcknowledgedViolations] = useState<string[]>(() => {
@@ -590,7 +643,6 @@ export default function TradingTerminal({
   };
 
   // Filter positions for active account
-  const { getMarketPrice } = useMarketDataContext();
   const myTrades = trades.filter(t => t.accountId === activeAccount.id);
   
   const openPositions = React.useMemo(() => {
@@ -599,21 +651,12 @@ export default function TradingTerminal({
       const liveMarket = getMarketPrice(pos.asset);
       const closePrice = liveMarket.price;
       const cleanSym = pos.asset.toUpperCase().replace('/', '');
-      const props = ASSET_PROPERTIES[cleanSym] || { contractSize: 100000 };
-      const contractSize = props.contractSize;
+      const contractSize = getSymbolContract(pos.asset);
 
-      let rawPnL = 0;
-      if (cleanSym === 'XAUUSD' || cleanSym === 'GOLD') {
-        const pipDifference = (pos.direction === 'buy' ? (closePrice - pos.entryPrice) : (pos.entryPrice - closePrice)) / 0.1;
-        const pipValueInUSD = 0.1 * contractSize; // Adjusted for contract size
-        rawPnL = pipDifference * pos.lotSize * pipValueInUSD;
-      } else {
-        if (pos.direction === 'buy') {
-          rawPnL = (closePrice - pos.entryPrice) * pos.lotSize * contractSize;
-        } else {
-          rawPnL = (pos.entryPrice - closePrice) * pos.lotSize * contractSize;
-        }
-      }
+      // BUY: closePrice - entryPrice, SELL: entryPrice - closePrice
+      const priceDifference = pos.direction === 'buy' ? (closePrice - pos.entryPrice) : (pos.entryPrice - closePrice);
+
+      const rawPnL = priceDifference * contractSize * pos.lotSize;
 
       const conversionRate = getClientQuoteToUSDExchangeRate(pos.asset);
       const profitLoss = rawPnL * conversionRate;
@@ -1258,6 +1301,13 @@ export default function TradingTerminal({
         </div>
       )}
 
+      {showPriceDesyncWarning && (
+        <div className="bg-amber-500/10 border-b border-amber-500/30 text-amber-400 text-xs px-4 py-2.5 flex items-center justify-center gap-2 font-semibold">
+          <AlertTriangle className="w-4 h-4 animate-pulse text-amber-400 shrink-0" />
+          <span>PRICE DESYNC warning: Engine price is currently desynced from TradingView live feed by more than 0.05 points. Syncing feed...</span>
+        </div>
+      )}
+
       {/* CORE GRID LAYOUT */}
       <div className="flex-grow grid grid-cols-1 lg:grid-cols-12 gap-1.5 p-1.5 max-w-[1600px] mx-auto w-full">
         
@@ -1435,6 +1485,41 @@ export default function TradingTerminal({
                     </>
                   )}
                 </button>
+              </div>
+            </div>
+
+            {/* Debugging Panel / Feed Sync Monitor */}
+            <div className="my-1.5 p-2 bg-[#06080D]/60 border border-gray-900 rounded-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-[10px] font-mono shadow-sm">
+              <div className="flex items-center gap-1.5 text-gray-400">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping mr-1"></span>
+                <span className="font-bold text-[9px] uppercase tracking-wider text-gray-500">Feed Sync Monitor ({activeSymbol}):</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-4 sm:gap-6">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-gray-500">Chart Price:</span>
+                  <span className="text-white font-bold">{debugChartPrice ? debugChartPrice.toFixed(ASSET_PROPERTIES[activeSymbol]?.digits || 2) : 'Fetching...'}</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-gray-500">Engine Price:</span>
+                  <span className="text-amber-500 font-bold">{debugEnginePrice ? debugEnginePrice.toFixed(ASSET_PROPERTIES[activeSymbol]?.digits || 2) : 'Fetching...'}</span>
+                </div>
+                <div className="flex items-center gap-1.5 border-l border-gray-800 pl-4">
+                  <span className="text-gray-500">Difference:</span>
+                  <span className={`font-bold ${debugDifference > 0.05 ? 'text-red-400 animate-pulse' : 'text-emerald-400'}`}>
+                    {debugDifference.toFixed(4)}
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 self-stretch sm:self-auto justify-end">
+                {showPriceDesyncWarning ? (
+                  <span className="bg-red-500/10 border border-red-500/30 text-red-400 text-[8px] font-bold px-1.5 py-0.5 rounded animate-pulse">
+                    PRICE DESYNC WARNING
+                  </span>
+                ) : (
+                  <span className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[8px] font-bold px-1.5 py-0.5 rounded">
+                    FEEDS SYNCED
+                  </span>
+                )}
               </div>
             </div>
 
@@ -1966,10 +2051,10 @@ export default function TradingTerminal({
                 const floatingPL = openPositions.reduce((sum, pos) => sum + pos.profitLoss, 0);
                 const equity = activeAccount.balance + floatingPL;
                 const usedMargin = openPositions.reduce((total, pos) => {
-                  const props = ASSET_PROPERTIES[pos.asset] || { contractSize: 100000 };
+                  const contractSize = getSymbolContract(pos.asset);
                   const baseToUsd = getClientBaseToUSDExchangeRate(pos.asset);
                   const posLeverage = pos.leverage || leverage || 100;
-                  return total + (pos.lotSize * props.contractSize * baseToUsd) / posLeverage;
+                  return total + (pos.lotSize * contractSize * baseToUsd) / posLeverage;
                 }, 0);
                 const freeMargin = Math.max(0, equity - usedMargin);
                 const marginLevel = usedMargin > 0 ? (equity / usedMargin) * 100 : 0;
@@ -2498,10 +2583,10 @@ export default function TradingTerminal({
                   <p className="text-sm font-bold text-amber-400 font-mono">
                     {(() => {
                       const usedMargin = openPositions.reduce((total, pos) => {
-                        const props = ASSET_PROPERTIES[pos.asset] || { contractSize: 100000 };
+                        const contractSize = getSymbolContract(pos.asset);
                         const baseToUsd = getClientBaseToUSDExchangeRate(pos.asset);
                         const posLeverage = pos.leverage || leverage || 100;
-                        return total + (pos.lotSize * props.contractSize * baseToUsd) / posLeverage;
+                        return total + (pos.lotSize * contractSize * baseToUsd) / posLeverage;
                       }, 0);
                       const equity = activeAccount.balance + openPositions.reduce((acc, curr) => acc + curr.profitLoss, 0);
                       return Math.max(0, equity - usedMargin);
@@ -2513,10 +2598,10 @@ export default function TradingTerminal({
                   <span className="text-gray-300 font-bold">
                     {(() => {
                       const usedMargin = openPositions.reduce((total, pos) => {
-                        const props = ASSET_PROPERTIES[pos.asset] || { contractSize: 100000 };
+                        const contractSize = getSymbolContract(pos.asset);
                         const baseToUsd = getClientBaseToUSDExchangeRate(pos.asset);
                         const posLeverage = pos.leverage || leverage || 100;
-                        return total + (pos.lotSize * props.contractSize * baseToUsd) / posLeverage;
+                        return total + (pos.lotSize * contractSize * baseToUsd) / posLeverage;
                       }, 0);
                       return usedMargin;
                     })().toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
@@ -2527,10 +2612,10 @@ export default function TradingTerminal({
                   <span className="text-gray-300 font-bold">
                     {(() => {
                       const usedMargin = openPositions.reduce((total, pos) => {
-                        const props = ASSET_PROPERTIES[pos.asset] || { contractSize: 100000 };
+                        const contractSize = getSymbolContract(pos.asset);
                         const baseToUsd = getClientBaseToUSDExchangeRate(pos.asset);
                         const posLeverage = pos.leverage || leverage || 100;
-                        return total + (pos.lotSize * props.contractSize * baseToUsd) / posLeverage;
+                        return total + (pos.lotSize * contractSize * baseToUsd) / posLeverage;
                       }, 0);
                       const equity = activeAccount.balance + openPositions.reduce((acc, curr) => acc + curr.profitLoss, 0);
                       const marginLevel = usedMargin > 0 ? (equity / usedMargin) * 100 : 0;

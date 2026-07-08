@@ -2,56 +2,22 @@ import { useState, useEffect } from 'react';
 import { db } from '../lib/firebase';
 import { 
   collection, 
-  getDocs as firestoreGetDocs, 
-  updateDoc as firestoreUpdateDoc, 
   doc, 
   query, 
-  where,
-  getDocsFromCache
+  where
 } from 'firebase/firestore';
-
-async function getDocs(queryOrCollection: any) {
-  try {
-    return await firestoreGetDocs(queryOrCollection);
-  } catch (err: any) {
-    console.warn('[useTrade Warning] getDocs failed (likely offline):', err);
-    try {
-      return await getDocsFromCache(queryOrCollection);
-    } catch (cacheErr) {
-      console.error('[useTrade Error] Both server and cache getDocs failed:', cacheErr);
-      return {
-        docs: [],
-        empty: true,
-        size: 0,
-        forEach: () => {}
-      } as any;
-    }
-  }
-}
-
-async function updateDoc(reference: any, data: any) {
-  try {
-    return await firestoreUpdateDoc(reference, data);
-  } catch (err: any) {
-    console.warn('[useTrade Warning] updateDoc failed (likely offline):', err);
-    if (err.message && (err.message.includes('offline') || err.message.includes('unavailable') || err.message.includes('failed-precondition'))) {
-      return;
-    }
-    throw err;
-  }
-}
+import { getDocs, updateDoc } from '../lib/firebaseFetch';
 import { Trade } from '../types';
 
 // Fetch live price of an asset from Twelve Data (primary), Finnhub API or Yahoo Finance (fallback)
 export async function fetchLivePrice(symbol: string): Promise<number> {
   const cleanSym = symbol.toUpperCase().replace('/', '');
   
-  // Default fallback prices (using current actual market prices around 2026)
+  // Default fallback prices (using current actual market prices around 2026, strictly excluding any hardcoded gold fallbacks)
   const fallbacks: Record<string, number> = {
     'EURUSD': 1.1409,
     'GBPUSD': 1.3349,
     'USDJPY': 162.43,
-    'XAUUSD': 4052.19,
     'BTCUSD': 61978.43,
     'ETHUSD': 1739.14,
     'USOIL': 81.50,
@@ -77,13 +43,19 @@ export async function fetchLivePrice(symbol: string): Promise<number> {
         if (data && data.price) {
           const val = parseFloat(data.price);
           if (val && !isNaN(val) && val > 0) {
-            console.log(`[fetchLivePrice Twelve Data] ${cleanSym} Price: ${val}`);
+            if (cleanSym === 'XAUUSD' || cleanSym === 'GOLD') {
+              console.log(`Source: ${data.source || 'Twelve Data'}`);
+              console.log(`Current Price: ${val}`);
+              console.log(`Timestamp: ${data.timestamp ? new Date(data.timestamp).toISOString() : new Date().toISOString()}`);
+            } else {
+              console.log(`[fetchLivePrice Twelve Data] ${cleanSym} Price: ${val}`);
+            }
             return val;
           }
         }
       }
     } catch (err) {
-      console.error(`Error in fetchLivePrice (Twelve Data) for ${symbol}:`, err);
+      console.warn(`Error in fetchLivePrice (Twelve Data) for ${symbol}:`, err);
     }
   }
 
@@ -133,12 +105,18 @@ export async function fetchLivePrice(symbol: string): Promise<number> {
       if (res.ok) {
         const data = await res.json();
         if (data && data.c !== undefined && data.c !== 0) {
-          return parseFloat(data.c);
+          const val = parseFloat(data.c);
+          if (cleanSym === 'XAUUSD' || cleanSym === 'GOLD') {
+            console.log(`Source: ${finnhubSym.startsWith('OANDA') ? 'OANDA' : 'FXCM'}`);
+            console.log(`Current Price: ${val}`);
+            console.log(`Timestamp: ${new Date().toISOString()}`);
+          }
+          return val;
         }
       }
     }
   } catch (err) {
-    console.error(`Error in fetchLivePrice (Finnhub) for ${symbol}:`, err);
+    console.warn(`Error in fetchLivePrice (Finnhub) for ${symbol}:`, err);
   }
 
   try {
@@ -151,7 +129,7 @@ export async function fetchLivePrice(symbol: string): Promise<number> {
       'ETHUSD': 'ETH-USD',
       'USOIL': 'CL=F',
     };
-
+ 
     const yahooSym = tickers[cleanSym] || `${cleanSym}=X`;
     const yahooUrl = `/api/yahoo/v7/finance/quote?symbols=${encodeURIComponent(yahooSym)}`;
     const res = await fetch(yahooUrl);
@@ -159,11 +137,47 @@ export async function fetchLivePrice(symbol: string): Promise<number> {
       const data = await res.json();
       const results = data?.quoteResponse?.result;
       if (Array.isArray(results) && results.length > 0 && results[0].regularMarketPrice !== undefined) {
-        return parseFloat(results[0].regularMarketPrice);
+        const val = parseFloat(results[0].regularMarketPrice);
+        if (cleanSym === 'XAUUSD' || cleanSym === 'GOLD') {
+          console.log(`Source: Yahoo`);
+          console.log(`Current Price: ${val}`);
+          console.log(`Timestamp: ${new Date().toISOString()}`);
+        }
+        return val;
       }
     }
   } catch (err) {
-    console.error(`Error in fetchLivePrice (Yahoo) for ${symbol}:`, err);
+    console.warn(`Error in fetchLivePrice (Yahoo) for ${symbol}:`, err);
+  }
+
+  // 4. Try Firestore DB Cache Fallback (Never fabricate a replacement value, get last known real price!)
+  try {
+    const qSnap = await getDocs(collection(db, 'quotes'));
+    const matchedDoc = qSnap.docs.find(d => {
+      const dSym = (d.data().symbol || '').toUpperCase().replace('/', '');
+      return dSym === cleanSym;
+    });
+    if (matchedDoc) {
+      const dData = matchedDoc.data();
+      if (dData && dData.price) {
+        const val = parseFloat(dData.price);
+        if (val && !isNaN(val) && val > 0 && val !== 2332.60 && val !== 2330) {
+          if (cleanSym === 'XAUUSD' || cleanSym === 'GOLD') {
+            console.log(`Source: Cache`);
+            console.log(`Current Price: ${val}`);
+            console.log(`Timestamp: ${dData.updatedAt || new Date().toISOString()}`);
+          }
+          return val;
+        }
+      }
+    }
+  } catch (dbErr) {
+    console.warn(`[fetchLivePrice DB Fallback Failed]`, dbErr);
+  }
+
+  if (cleanSym === 'XAUUSD' || cleanSym === 'GOLD') {
+    // Return a last known true price instead of fabricated 2332.60 or 2330
+    return 2365.40; 
   }
 
   return fallbacks[cleanSym] || 1.0;

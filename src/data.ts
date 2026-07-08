@@ -274,7 +274,7 @@ export const INITIAL_QUOTES: MarketQuote[] = [
   { symbol: 'CHFJPY', name: 'Swiss Franc / Japanese Yen', price: 174.600, change: 0.15, prevPrice: 174.340, high: 175.200, low: 173.900 },
 
   // Metals
-  { symbol: 'XAUUSD', name: 'Gold / US Dollar', price: 2332.60, change: -0.42, prevPrice: 2342.43, high: 2355.00, low: 2321.10 },
+  { symbol: 'XAUUSD', name: 'Gold / US Dollar', price: 2365.40, change: -0.30, prevPrice: 2372.50, high: 2385.00, low: 2355.20 },
   { symbol: 'XAGUSD', name: 'Silver / US Dollar', price: 29.50, change: -0.85, prevPrice: 29.75, high: 30.10, low: 29.20 },
 
   // Indices
@@ -307,7 +307,7 @@ export const INITIAL_QUOTES: MarketQuote[] = [
   { symbol: 'GBP/USD', name: 'Pound Sterling / US Dollar', price: 1.26520, change: -0.05, prevPrice: 1.26580, high: 1.26910, low: 1.26250 },
   { symbol: 'USD/JPY', name: 'US Dollar / Japanese Yen', price: 156.450, change: 0.35, prevPrice: 155.900, high: 156.800, low: 155.650 },
   { symbol: 'BTC/USD', name: 'Bitcoin / US Dollar', price: 61250.00, change: 1.84, prevPrice: 60143.36, high: 62150.00, low: 59850.00 },
-  { symbol: 'GOLD', name: 'Gold Spot (troy ounce)', price: 2332.60, change: -0.42, prevPrice: 2342.43, high: 2355.00, low: 2321.10 }
+  { symbol: 'GOLD', name: 'Gold Spot (troy ounce)', price: 2365.40, change: -0.30, prevPrice: 2372.50, high: 2385.00, low: 2355.20 }
 ];
 
 // Helper values to calculate lot values and pip sizes for each asset
@@ -375,3 +375,27 @@ export const ASSET_PROPERTIES: Record<string, {
   'BTC/USD': { pipSize: 1.0, lotSizeMultiplier: 1, digits: 2, spread: 8.0, contractSize: 1, tickSize: 0.01, tickValue: 0.01, minLot: 0.01, maxLot: 50, lotStep: 0.01, decimals: 2 },
   'GOLD': { pipSize: 0.1, lotSizeMultiplier: 100, digits: 2, spread: 0.25, contractSize: 100, tickSize: 0.01, tickValue: 1.0, minLot: 0.01, maxLot: 50, lotStep: 0.01, decimals: 2 }
 };
+
+export const DYNAMIC_CONFIG_MAP: Record<string, { contract: number; tick: number }> = {
+  'XAUUSD': { contract: 100, tick: 0.1 },
+  'GOLD': { contract: 100, tick: 0.1 },
+  'EURUSD': { contract: 100000, tick: 0.0001 },
+  'EUR/USD': { contract: 100000, tick: 0.0001 }
+};
+
+export function getSymbolContract(symbol: string): number {
+  const key = symbol.toUpperCase().replace('/', '');
+  if (DYNAMIC_CONFIG_MAP[key]) {
+    return DYNAMIC_CONFIG_MAP[key].contract;
+  }
+  return ASSET_PROPERTIES[key]?.contractSize || ASSET_PROPERTIES[symbol]?.contractSize || 100000;
+}
+
+export function getSymbolTick(symbol: string): number {
+  const key = symbol.toUpperCase().replace('/', '');
+  if (DYNAMIC_CONFIG_MAP[key]) {
+    return DYNAMIC_CONFIG_MAP[key].tick;
+  }
+  return ASSET_PROPERTIES[key]?.pipSize || ASSET_PROPERTIES[symbol]?.pipSize || 0.0001;
+}
+

@@ -34,7 +34,7 @@ export interface ChallengeConfig {
   description: string;
 }
 
-export type AccountStatus = 'pending_payment' | 'active' | 'passed_phase1' | 'passed_phase2' | 'breached' | 'suspended';
+export type AccountStatus = 'pending_payment' | 'active' | 'passed_phase1' | 'passed_phase2' | 'breached' | 'suspended' | 're_syncing_data';
 export type AccountPhase = 'phase1' | 'phase2' | 'funded';
 
 export interface Account {
